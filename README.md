@@ -1,6 +1,6 @@
 # 全能小说作家
 
-[![Version](https://img.shields.io/badge/version-6.1.0-blue)](https://github.com/Fly143/ultimate-novel-creation-skill)
+[![Version](https://img.shields.io/badge/version-6.2.0-blue)](https://github.com/Fly143/ultimate-novel-creation-skill)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 面向 AI Agent 的全流程长篇小说创作技能。从书名生成到千章完稿，配备自然语言记忆系统确保长篇连贯性。
@@ -14,8 +14,9 @@
 - **Bible 文档增长控制**：超 30KB 自动压缩远古内容，细节下沉到卷压缩，按需回读
 - **双轨书名策略**：网文风（起点/番茄）+ 出版风（实体/IP），含四步迭代生成法
 - **通用作家风格分析**：三步拆解法（句长指纹 → 爽点公式 → 金句模式），含网文作者速查表
-- **三道生成门禁**：引用校验/一致性校验/蓝图出场校验，不通过不视为完成
+- **五道生成门禁**：引用校验/一致性校验/蓝图出场校验/未知实体检测/描写一致性，不通过不视为完成
 - **蓝图系统**：每章指定出场角色、场景、冲突目标，门禁自动校验
+- **统一校验**：修改设定后扫描最近 20 章，精确定位冲突章节和修订建议
 - **物品/势力/位置追踪**：story_bible 追踪关键物品流转与势力格局，character_arcs 追踪角色位置
 - **变更声明**：每章摘要显式记录角色变化/物品流转/势力变化/伏笔动作
 - **11 个精选写作参考**：爽文理论、爽点设计、黄金开篇、风格技巧、打斗场景、高级写作技法

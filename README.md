@@ -1,6 +1,6 @@
 # 全能小说作家
 
-[![Version](https://img.shields.io/badge/version-6.3.0-blue)](https://github.com/Fly143/ultimate-novel-creation-skill)
+[![Version](https://img.shields.io/badge/version-6.4.0-blue)](https://github.com/Fly143/ultimate-novel-creation-skill)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 面向 AI Agent 的全流程长篇小说创作技能。从书名生成到千章完稿，配备自然语言记忆系统确保长篇连贯性。
@@ -19,6 +19,10 @@
 - **角色权重系统**：按主角/核心配角/关键角色分级加载上下文，千章不爆内存
 - **唯一 ID 追踪**：角色改名不丢轨迹，防止「三个张三」混淆
 - **势力归属**：每个角色强制绑定势力，势力格局变动自动关联
+- **反 AI 铁律**：7 条硬规则去 AI 味（禁用分析语言/高频词限流/禁止比喻重复/情绪动作外化）
+- **伏笔原始文本锚定**：种伏笔时保留原文片段，回收时精确对接
+- **旧债优先规则**：活跃伏笔 >5 个禁开新坑，超期先清旧债
+- **Chapter Memo**：每章写作前四问（读者在等什么/必须兑现什么/章尾改变什么/不要做什么）
 - **统一校验**：修改设定后扫描最近 20 章，精确定位冲突章节和修订建议
 - **物品/势力/位置追踪**：story_bible 追踪关键物品流转与势力格局，character_arcs 追踪角色位置
 - **变更声明**：每章摘要显式记录角色变化/物品流转/势力变化/伏笔动作

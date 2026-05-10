@@ -1,6 +1,6 @@
 # 全能小说作家
 
-[![Version](https://img.shields.io/badge/version-5.0.0-blue)](https://github.com/Fly143/ultimate-novel-creation-skill)
+[![Version](https://img.shields.io/badge/version-5.1.0-blue)](https://github.com/Fly143/ultimate-novel-creation-skill)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 面向 AI Agent 的全流程长篇小说创作技能。涵盖书名生成、世界观构建、人设设计、情节大纲、章节写作、爽点设计、节奏诊断，配备自然语言记忆系统确保长篇连贯性，支持 AI 全自动和分步引导双模式。
@@ -13,7 +13,7 @@
 - **远古伏笔语境回读**：第 500 章回收第 1 章伏笔时，自动回读原始章节摘要保证语境完整
 - **Bible 文档增长控制**：超 30KB 自动压缩远古内容，细节下沉到卷压缩，按需回读
 - **双轨书名策略**：网文风（起点/番茄）+ 出版风（实体/IP），按目标平台切换
-- **10 个精选写作参考**：对话技巧、打斗场景、情感描写、爽点设计、节奏诊断、毒舌/神回复风格等
+- **10 个精选写作参考**：爽点设计、黄金开篇、风格技巧、打斗场景、书名策略、高级写作技法
 - **16 个精简模板**：人设卡、人物关系图谱、情节大纲、章节规划、百万字规划、节奏诊断报告等
 
 ## 项目结构

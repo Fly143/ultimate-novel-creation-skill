@@ -9,7 +9,7 @@ description: |
   「看记忆」「导出」「金手指」「叙事线」「分析《XXX》」「菜单」
 user-invocable: true
 tags: [小说, 创作, 写作, 长篇, 故事, 文学, 大纲, 人物, 章节写作, 爽文, 网文, 平台文案, 书名生成, 记忆系统, 自然语言记忆, 风格创作, 短篇爆款]
-version: 6.8.2
+version: 6.8.3
 ---
 
 
@@ -141,15 +141,6 @@ version: 6.8.2
 - 网文格式：纯txt，适配各平台
 - 电子书：epub格式，支持目录导航
 - 投稿版：Word格式，标准投稿排版
-
-## 🔧 维护参考
-
-- `references/auto-manual-convention.md` — 自动/手动工作流分离规则
-- `references/release-process.md` — 本技能 GitHub 发布流程（zip 结构 / 版本 bump / tag 冲突）
-- `references/nuwa-skill-analysis.md` — 女娲.skill 调研分析（表达DNA框架借鉴来源）
-- `references/narrative-consultant-design-pattern.md` — 叙事参谋设计模式（新增诊断/监控类功能时必须遵循）
-- `references/feature-design-guide.md` — 新功能设计原则（叙事参谋 / 默认开启 / 集成清单）
-- `references/强约束系统设计方案.md` — 功能 23 强约束系统设计蓝图（v6.7.0 已实施）
 
 ## ⚠️ 边界条件
 

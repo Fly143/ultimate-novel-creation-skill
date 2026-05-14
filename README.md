@@ -3,8 +3,8 @@
 [![Version](https://img.shields.io/badge/version-6.9.6-blue)](https://github.com/Fly143/ultimate-novel-creation-skill)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-> 🧪 **定向探索版 — 仅自用**  
-> 本分支为 `go-novel-personal`，在主线基础上集成了围棋对局模块（内置吴清源全集 1,165 局真实棋谱），专用于围棋题材小说创作。不合并主线，也不对外发布。
+> 🧪 **定向探索版 — 自用分支**  
+> 本分支为 `go-novel-personal`，在主线基础上集成了围棋对局模块（内置吴清源全集 1,165 局真实棋谱），专用于围棋题材小说创作。不合并主线。
 
 面向 AI Agent 的全流程长篇小说创作技能。从书名生成到千章完稿，配备三大自动系统（记忆系统/强约束/叙事质量管理）确保长篇连贯性。支持 AI 全自动和分步引导双模式。
 

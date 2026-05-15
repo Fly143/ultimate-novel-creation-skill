@@ -3,8 +3,8 @@
 [![Version](https://img.shields.io/badge/version-6.9.6-blue)](https://github.com/Fly143/ultimate-novel-creation-skill)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-> 🧪 **定向探索版 — 自用分支**  
-> 本分支为 `go-novel-personal`，在主线基础上集成了围棋对局模块（内置吴清源全集 1,165 局真实棋谱），专用于围棋题材小说创作。不合并主线。
+> 🧪 **定向探索版 — 自用分支**
+> 本分支为 `go-novel-personal`，在主线基础上集成了围棋对局模块（内置 516 局真实职业棋谱），专用于围棋题材小说创作。不合并主线。
 
 面向 AI Agent 的全流程长篇小说创作技能。从书名生成到千章完稿，配备三大自动系统（记忆系统/强约束/叙事质量管理）确保长篇连贯性。支持 AI 全自动和分步引导双模式。
 
@@ -200,11 +200,12 @@
 ├── modules/              # 24 个功能模块（含执行协议/启动引导/场景映射）
 ├── references/           # 14 个精选写作参考（含规则集）
 ├── templates/            # 14 个输出模板（含约束系统）
-└── memory-system/        # 记忆系统模板（skill 内只读）
-    ├── bible/            # 故事圣经 / 人物弧线 / 剧情时间线 / 伏笔清单
-    ├── summaries/        # 单章摘要模板
-    ├── phases/           # 阶段压缩模板（每 10 章）
-    └── volumes/          # 卷压缩模板（每 50 章）
+├── memory-system/        # 记忆系统模板（skill 内只读）
+│   ├── bible/            # 故事圣经 / 人物弧线 / 剧情时间线 / 伏笔清单
+│   ├── summaries/        # 单章摘要模板
+│   ├── phases/           # 阶段压缩模板（每 10 章）
+│   └── volumes/          # 卷压缩模板（每 50 章）
+└── data/sgf/             # 棋谱库（516 局真实职业棋谱，001-516.sgf）
 ```
 
 ## 核心能力

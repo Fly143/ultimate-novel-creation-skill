@@ -1,6 +1,6 @@
 # 全能小说作家
 
-[![Version](https://img.shields.io/badge/version-8.0.17-blue)](https://github.com/Fly143/ultimate-novel-creation-skill)
+[![Version](https://img.shields.io/badge/version-8.0.18-blue)](https://github.com/Fly143/ultimate-novel-creation-skill)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 面向 AI Agent 的全流程长篇小说创作技能。从书名生成到千章完稿，配备三大自动系统（记忆系统/强约束/叙事质量管理）确保长篇连贯性。支持 AI 全自动和分步引导双模式。
@@ -222,7 +222,7 @@
 
 ```
 ├── SKILL.md              # 技能入口 + 路径约定
-├── modules/              # 26 个功能模块（含执行协议/启动引导/场景映射）
+├── modules/              # 32 个模块文件（26 功能模块 + 5 核心协议/规范 + 1 场景映射）
 ├── references/           # 11+2 个精选写作参考（含 rulesets/ 子目录）
 ├── templates/            # 11+3 个输出模板（含 constraints/ 子目录）
 └── memory-system/        # 记忆系统模板（skill 内只读）

@@ -246,6 +246,29 @@
 
 用户输入「写小说」即可触发完整创作流程。长篇连载自动启用记忆系统。
 
+## 版本策略
+
+- **语义化版本**：破坏性变更（如路径/结构不兼容）→ 主版本（10.0）；新功能 → 次版本（9.5）；纯修复 → 补丁（9.4.x）
+- 版本号维护于 `SKILL.md` frontmatter 与 README 徽章，两处必须一致（CI 自动校验）
+- 发布流程：改动 → 本地跑 `pwsh .github/scripts/audit.ps1 -Root .` → 通过后 bump 版本 → `gh release create vX.Y.Z`
+
+## 旧项目迁移（v9.4.0 之前）
+
+9.4.0 起记忆系统产出路径中文化（bible→圣经、summaries→摘要、phases→阶段、volumes→卷、constraints→约束）。9.4.0 之前创建的项目需迁移，否则跨会话恢复找不到项目：
+
+```powershell
+# 在项目目录（含 [书名]/ 的上级目录）运行
+powershell -ExecutionPolicy Bypass -File scripts/migrate_memory_paths.ps1          # 预览
+powershell -ExecutionPolicy Bypass -File scripts/migrate_memory_paths.ps1 -Apply   # 执行
+```
+
+脚本已随各 release 附于 Assets（`migrate_memory_paths.ps1`）。
+
+## 质量保障
+
+- **CI 完整性审计**：每次 push/PR 自动检查死引用、孤儿文件、版本号一致性、残留英文路径（`.github/workflows/audit.yml`）
+- **冒烟测试验收清单**：`SMOKE_TEST.md` 提供端到端验收步骤（初始化→写作→流水线→恢复→周期检查）
+
 ## 声明
 
 本技能所有内容均由 AI 生成，不含任何人工编写，望周知！

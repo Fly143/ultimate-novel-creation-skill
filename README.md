@@ -189,22 +189,22 @@
 │   ├── 商业可行性评估报告.md
 │   └── 创新深度检查报告.md
 ├── 记忆系统/
-│   ├── bible/
-│   │   ├── story_bible.md
-│   │   ├── character_arcs.md
-│   │   ├── plot_timeline.md
-│   │   ├── chekhovs_gun.md
-│   │   ├── character_database.md
-│   ├── constraints/
-│   │   ├── cheat_constraints.md
-│   │   ├── time_constraints.md
-│   │   └── narrative_threads.md
-│   ├── summaries/
-│   │   ├── ch_001_summary.md ...
-│   ├── phases/
-│   │   └── phase_1_ch1-10.md ...
-│   └── volumes/
-│       └── volume_1_ch1-50.md ...
+│   ├── 圣经/
+│   │   ├── 故事圣经.md
+│   │   ├── 人物弧线.md
+│   │   ├── 剧情时间线.md
+│   │   ├── 伏笔清单.md
+│   │   ├── 角色数据库.md
+│   ├── 约束/
+│   │   ├── 金手指约束.md
+│   │   ├── 时间约束.md
+│   │   └── 叙事线.md
+│   ├── 摘要/
+│   │   ├── 第001章摘要.md ...
+│   ├── 阶段/
+│   │   └── 阶段1_第1-10章.md ...
+│   └── 卷/
+│       └── 卷1_第1-50章.md ...
 └── 正文/
     ├── 第001章_章节名.txt
     └── 第002章_章节名.txt ...

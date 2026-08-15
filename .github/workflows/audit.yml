@@ -1,0 +1,23 @@
+name: 完整性审计
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: 引用/孤儿/版本/路径审计
+    runs-on: windows-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 运行完整性审计
+        shell: pwsh
+        run: |
+          pwsh .github/scripts/audit.ps1 -Root $PWD
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

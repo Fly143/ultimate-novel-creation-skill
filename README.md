@@ -246,12 +246,6 @@
 
 用户输入「写小说」即可触发完整创作流程。长篇连载自动启用记忆系统。
 
-## 版本策略
-
-- **语义化版本**：破坏性变更（如路径/结构不兼容）→ 主版本（10.0）；新功能 → 次版本（9.5）；纯修复 → 补丁（9.4.x）
-- 版本号维护于 `SKILL.md` frontmatter 与 README 徽章，两处必须一致（CI 自动校验）
-- 发布流程：改动 → 本地跑 `pwsh .github/scripts/audit.ps1 -Root .` → 通过后 bump 版本 → `gh release create vX.Y.Z`
-
 ## 旧项目迁移（v9.4.0 之前）
 
 9.4.0 起记忆系统产出路径中文化（bible→圣经、summaries→摘要、phases→阶段、volumes→卷、constraints→约束）。9.4.0 之前创建的项目需迁移，否则跨会话恢复找不到项目：
@@ -263,10 +257,6 @@ powershell -ExecutionPolicy Bypass -File scripts/migrate_memory_paths.ps1 -Apply
 ```
 
 脚本已随各 release 附于 Assets（`migrate_memory_paths.ps1`）。
-
-## 质量保障
-
-- **CI 完整性审计**：每次 push/PR 自动检查死引用、孤儿文件、版本号一致性、残留英文路径（`.github/workflows/audit.yml`）
 
 ## 声明
 

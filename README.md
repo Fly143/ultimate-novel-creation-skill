@@ -267,7 +267,6 @@ powershell -ExecutionPolicy Bypass -File scripts/migrate_memory_paths.ps1 -Apply
 ## 质量保障
 
 - **CI 完整性审计**：每次 push/PR 自动检查死引用、孤儿文件、版本号一致性、残留英文路径（`.github/workflows/audit.yml`）
-- **冒烟测试验收清单**：`SMOKE_TEST.md` 提供端到端验收步骤（初始化→写作→流水线→恢复→周期检查）
 
 ## 声明
 

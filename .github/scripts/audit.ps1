@@ -75,6 +75,7 @@ Get-ChildItem -Recurse -File $Root -Filter *.md | ForEach-Object {
 $orphans = @()
 foreach($f in $files){
   if($f -match '^(README|LICENSE|\.gitignore)'){ continue }
+  if($f -like '.github/*'){ continue }   # .github/ 为维护者工具/文档，无需被 skill 内容引用
   $base = [System.IO.Path]::GetFileName($f); $fwd = $f -replace '\\','/'
   $hits = 0
   foreach($k in $allText.Keys){ if($k -ne $fwd -and ($allText[$k].Contains($base) -or $allText[$k].Contains($fwd))){ $hits++ } }

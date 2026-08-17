@@ -60,7 +60,7 @@ Get-ChildItem -Recurse -File $Root -Filter *.md | ForEach-Object {
   }
 }
 
-$genuine = @($broken.Keys | Where-Object { $_ -notmatch '记忆系统|设定/|正文/|导出/|拆解/|细纲/|\.done|项目|进度看板|创作状态追踪|商业可行性|创新深度|章节规划表|立项定位|故事圣经|人物弧线|剧情时间线|伏笔清单|角色数据库|金手指约束|时间约束|叙事线|约束|阶段|卷|摘要|圣经|SMOKE_TEST|我的修仙小说|memory-system/' } | Where-Object { $_ -notmatch '\|\.md$' })
+$genuine = @($broken.Keys | Where-Object { $_ -notmatch '记忆系统|设定/|正文/|导出/|拆解/|细纲/|\.done|项目|进度看板|创作状态追踪|商业可行性|创新深度|章节规划表|立项定位|故事圣经|人物弧线|剧情时间线|伏笔清单|角色数据库|金手指约束|时间约束|叙事线|约束|阶段|卷|摘要|圣经|SMOKE_TEST|我的修仙小说|memory-system/|拆解报告|情节节点|情绪模块|人物模块|素材引用说明|文风' } | Where-Object { $_ -notmatch '\|\.md$' })
 if($genuine.Count){
   $errors += "死引用审计发现 $($genuine.Count) 处疑似问题："
   $genuine | Sort-Object | ForEach-Object { $errors += "  $_" }

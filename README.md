@@ -246,7 +246,7 @@
 
 用户输入「写小说」即可触发完整创作流程。长篇连载自动启用记忆系统。
 
-在第三方软件（Claude Code / Cursor / API 接入 / Dify·Coze 等）中使用时，可将 `接入提示词模板.md` 配置为该软件的 system prompt，确保宿主 agent 严格按技能执行、不自由发挥。
+在第三方软件（Claude Code / Cursor / API 接入 / Dify·Coze 等）中使用时，可将 `system_prompt.md` 配置为该软件的 system prompt，确保宿主 agent 严格按技能执行、不自由发挥。
 
 ## 旧项目迁移（v9.4.0 之前）
 

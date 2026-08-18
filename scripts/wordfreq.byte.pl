@@ -82,7 +82,50 @@ for my $spec (@WORDSPEC) {
     push @results, { tier=>$tier, word=>$word, perK=>$perK, n=>$n, flag=>$flag };
 }
 
+# ---- 连环堆叠检测（★v9.5.7 实测修正）----
+# 真人不是不用这些词，是"堆叠"才 AI 味。判定按句长加权 + 部位词降权：
+#   堆叠 = 加权词数 ≥ max(3, 句字符数/15)
+# 身体部位词（心中/眼中/脸上）真人大量用（金庸"眼中不禁湿润，微微叹气"很自然），权重 0.5；
+# 副词/虚词类（微微/不禁/似乎/然而…）权重 1。加权后仍 ≥3 才标 ⚠️。
+# 注：字节模式下不能用字符类 [。！？] 切句（多字节标点会被拆成单字节误伤），
+#     用 CHAR 逐字符消费 + 句末标点字节序列判断句界。
+my @WATCH_HI = map { $_->[1] } grep { $_->[0] eq "高危" } @WORDSPEC;   # 权重1
+# 中频除身体词外权重1（身体词单独 0.5，避免双重计分）；身体词字节序列显式列出
+my @WATCH_MID = map { $_->[1] } grep { $_->[0] eq "中频" } @WORDSPEC;
+my @WATCH_BODY = ("\xE5\xBF\x83\xE4\xB8\xAD","\xE7\x9C\xBC\xE4\xB8\xAD","\xE8\x84\xB8\xE4\xB8\x8A"); # 心中/眼中/脸上 权重0.5
+# 从 MID 中剔除身体词（字节序列相等比较），避免双重计分
+@WATCH_MID = grep { my $w=$_; !grep { $w eq $_ } @WATCH_BODY } @WATCH_MID;
+my $stack = 0;
+my $stackSample = "";
+my ($sbeg, $i) = (0, 0);
+my @SENTEND = ("\xE3\x80\x82","\xEF\xBC\x81","\xEF\xBC\x9F","\xE2\x80\xA6","\xEF\xBC\x9B"); # 。！？…；
+while ($t =~ /$CHAR/g) {
+    my $ch = $&;
+    my $isEnd = 0;
+    for my $se (@SENTEND) { if ($ch eq $se) { $isEnd = 1; last; } }
+    if ($isEnd || ($ch eq "\n") || ($ch eq ";" || $ch eq "!" || $ch eq "?")) {
+        my $sent = substr($t, $sbeg, pos($t) - $sbeg - length($ch));
+        $sbeg = pos($t);
+        my $slen = 0; $slen++ while $sent =~ /$CHAR/g;
+        my $score = 0;
+        for my $w (@WATCH_HI)  { my $c = 0; $c++ while $sent =~ /$w/g; $score += $c; }
+        for my $w (@WATCH_MID) { my $c = 0; $c++ while $sent =~ /$w/g; $score += $c; }
+        for my $w (@WATCH_BODY){ my $c = 0; $c++ while $sent =~ /$w/g; $score += 0.5 * $c; }
+        my $thresh = $slen / 15;
+        $thresh = 3 if $thresh < 3;
+        if ($score >= $thresh) {
+            $stack++;
+            if ($stackSample eq "") {
+                $stackSample = $sent;
+                $stackSample =~ s/^$WS+|$WS+$//g;
+                $stackSample = substr($stackSample, 0, 40) . "…" if length($stackSample) > 40;
+            }
+        }
+    }
+}
+
 print "总字数=$total\n";
 for my $r (sort { $b->{perK} <=> $a->{perK} } @results) {
     printf "  [%s] %s: %.2f/千字 (%d次)%s\n", $r->{tier}, $r->{word}, $r->{perK}, $r->{n}, $r->{flag};
 }
+print "连环堆叠句: $stack 句" . ($stack ? " ⚠️ 示例: $stackSample" : " ✅") . "\n";

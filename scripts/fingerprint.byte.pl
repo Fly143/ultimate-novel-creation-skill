@@ -102,9 +102,24 @@ my $cSum = 0; $cSum += $_ for @cl;
 my $cAvg = sprintf("%.1f", $cSum/@cl);
 
 # ---- 对话占比（“…”或「…」，含引号字符，同 fingerprint.pl 的 $&）----
+# ★v9.5.7 修复：字节模式负向前瞻 (?:(?!右引号).)* 会跨过右引号（中间字节被 . 消费），
+#     改为按完整 UTF-8 字符消费，遇右引号/左引号即停。
+my $LQ = "\xE2\x80\x9C"; my $RQ = "\xE2\x80\x9D";   # “ ”
+my $LJ = "\xE3\x80\x8C"; my $RJ = "\xE3\x80\x8D";   # 「 」
 my $dqSum = 0;
-while ($raw =~ /\xE2\x80\x9C(?:(?!\xE2\x80\x9D).)*\xE2\x80\x9D|\xE3\x80\x8C(?:(?!\xE3\x80\x8D).)*\xE3\x80\x8D/g) {
-    $dqSum += charcount($&);
+my $pos = 0;
+my $rawLen = length($raw);
+while ($pos < $rawLen) {
+    my $start = index($raw, $LQ, $pos);
+    my $startJ = index($raw, $LJ, $pos);
+    if ($start < 0 || ($startJ >= 0 && $startJ < $start)) { $start = $startJ; }
+    last if $start < 0;
+    my $close = index($raw, $RQ, $start + 3);
+    my $closeJ = index($raw, $RJ, $start + 3);
+    if ($close < 0 || ($closeJ >= 0 && $closeJ < $close)) { $close = $closeJ; }
+    if ($close < 0) { last; }   # 未闭合引号：停止（数据异常）
+    $dqSum += charcount(substr($raw, $start, $close + 3 - $start));
+    $pos = $close + 3;
 }
 my $dqPct = sprintf("%.1f", 100.0*$dqSum/$total);
 

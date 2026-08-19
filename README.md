@@ -49,7 +49,7 @@ hermes profile create novel-writer --clone-from novel --description "小说写�
 
 **技能不共用**：Hermes 的 profile 隔离是目录级的——每个 agent 持有 `skills/ultimate-novel-creation-skill/` 的**独立完整副本**（模块/references/templates/memory-system 全在内）。因此：
 - 各 agent 物理上能读全部 27 个模块，**行为边界由 SOUL 铁律约束**（角色 SKILL.md 的专属模块清单 + 不越权条款）
-- 更新技能时**不要手动逐个改**，用同步脚本一键分发：
+- 更新技能时**不要手动逐个改**，用同步脚本一键分发（**技能 + SOUL 一起同步**）：
 
 ```bash
 bash sync_agents.sh              # 同步到全部 novel 系 profile（novel + 4 角色）
@@ -57,7 +57,9 @@ bash sync_agents.sh novel-writer # 只同步指定 profile
 bash sync_agents.sh --dry-run    # 先预览
 ```
 
-脚本将仓库（唯一事实源）整体覆盖到各 profile 的技能目录。**改技能的正确姿势**：先在仓库改 → commit/push → 跑 `sync_agents.sh` 分发到各 agent。
+脚本将仓库（唯一事实源）整体覆盖到各 profile 的技能目录，并**从 `agents/<角色>/system_prompt.md` 重新生成各 profile 的 `SOUL.md`**（角色 SOUL 的权威来源是仓库，本地不要手改 SOUL——改了也会被脚本覆盖）。**改技能/人格的正确姿势**：先在仓库改（SKILL.md / system_prompt.md）→ commit/push → 跑 `sync_agents.sh` 分发到各 agent。
+
+> **人格说明**：主编（novel）默认融合「小爱同学」创作导师人格（十年网文经验资深小说家），定义在 `agents/00_主编_director/system_prompt.md`，部署时自动进入 SOUL。不需要可删减该节。
 
 ### 四、流水线时序（场景B 继续创作）
 

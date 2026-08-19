@@ -32,11 +32,19 @@ function Test-Cand([string]$cand, [string]$srcDir, [string]$label, [string]$line
   $c = $c -replace '^\./','' -replace '\\','/'
   if($c -match '^(\[书名\]|\{书名\}|\*|\.\./)'){ return }
   if($c -match '(NNN|XXX|ch_\*|chX|phase_N|volume_N|N\+|第X章|第NNN章|\{序号\}|\{起始\}|\{结束\}|\{章节编号|第\{|阶段N_|卷N_)'){ return }
+  # 部署/宿主外部路径豁免（多 Agent 版部署说明，非仓库文件）
+  if($c -match '^(skills/|agents/<|SOUL\.md$)'){ return }
   if($label -like 'BARE*' -and $matchIdx -gt 0){
     $prefix = $line.Substring(0, $matchIdx)
     if($prefix -match '(modules|references|templates|memory-system|记忆系统模板|模块|参考资源|模板|圣经|摘要|阶段|卷|约束)/$'){ return }
   }
-  foreach($t in @($c, $(if($srcDir){"$srcDir/$c"}))){
+  $cands = @($c)
+  if($srcDir){ $cands += "$srcDir/$c" }
+  if($c -match '^[0-9]{2}_'){ $cands += "agents/$c" }   # agents/ 角色目录内引用（BARE 拆出 NN_ 前缀）
+  if($srcDir -match '^agents(/|$)' -and $c -notmatch '/'){
+    $cands += "references/$c"; $cands += "templates/$c"; $cands += "memory-system/$c"; $cands += "modules/$c"
+  }
+  foreach($t in $cands){
     if($null -eq $t){ continue }
     $t = $t.TrimEnd('/') -replace '//+','/'
     if($fileSet.ContainsKey($t) -or $dirSet.ContainsKey($t)){ return }

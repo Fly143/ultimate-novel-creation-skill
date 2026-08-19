@@ -45,7 +45,21 @@ hermes profile create novel-writer --clone-from novel --description "小说写�
 
 > **机制说明**：桌面端「新增 agent」= 新建一个 profile 并启动独立 backend 进程（`hermes --profile <name> serve`）。每个 agent 独立持有 memory / skills / 会话历史，`ui_meta.hermes-bots` 块（shape/color/chat）是 Bot Mode 的识别与显示标识，canonical 「Bot Chat」会话承载 agent 间互 @ 与交接。
 
-### 三、流水线时序（场景B 继续创作）
+### 三、技能副本与同步（重要）
+
+**技能不共用**：Hermes 的 profile 隔离是目录级的——每个 agent 持有 `skills/ultimate-novel-creation-skill/` 的**独立完整副本**（模块/references/templates/memory-system 全在内）。因此：
+- 各 agent 物理上能读全部 27 个模块，**行为边界由 SOUL 铁律约束**（角色 SKILL.md 的专属模块清单 + 不越权条款）
+- 更新技能时**不要手动逐个改**，用同步脚本一键分发：
+
+```bash
+bash sync_agents.sh              # 同步到全部 novel 系 profile（novel + 4 角色）
+bash sync_agents.sh novel-writer # 只同步指定 profile
+bash sync_agents.sh --dry-run    # 先预览
+```
+
+脚本将仓库（唯一事实源）整体覆盖到各 profile 的技能目录。**改技能的正确姿势**：先在仓库改 → commit/push → 跑 `sync_agents.sh` 分发到各 agent。
+
+### 四、流水线时序（场景B 继续创作）
 
 ```
 主编 ──章节指令+细纲──▶ 写手
@@ -58,7 +72,7 @@ hermes profile create novel-writer --clone-from novel --description "小说写�
                 复审PASS → 主编写 .done 闭环
 ```
 
-### 四、核心铁律（所有 Agent 必须遵守）
+### 五、核心铁律（所有 Agent 必须遵守）
 
 1. **写审分离**：写手不审核自己产出，审核官不改稿，修复师只按报告改——三方必须不同 Agent。
 2. **显式顺序呼叫**：主编必须显式 @ 下一个 Agent 并按序推进，不依赖群聊自发发言。
@@ -66,7 +80,7 @@ hermes profile create novel-writer --clone-from novel --description "小说写�
 4. **双向对账**：审核官发现记忆与正文不一致时，按溯源规则判责（新章vs归档→归档错；新章vs历史→翻原文；新章vs设定→查约束源），不默认正文错。
 5. **不越权**：各 Agent 只执行自己职责清单内的工作，其余一律交还主编路由。
 
-### 五、模块归属
+### 六、模块归属
 
 27 个功能模块的归属（🟢专属 / 🟡共享 / 🔵主编调度）见 [`agents/模块归属映射表.md`](agents/模块归属映射表.md)。模块文件**不物理复制**，统一存放根目录 `modules/`（单一事实源）。
 

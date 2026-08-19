@@ -28,10 +28,22 @@
 
 ### 二、部署步骤（Hermes 桌面端 Bot Mode）
 
-1. **建 profile**：为每个角色创建一个 profile（主编可复用现有 novel profile），`terminal.cwd` 指向小说工程根目录（如 `D:/小说`）。
-2. **挂 SOUL**：每个 profile 的 `SOUL.md` 写入对应角色 `system_prompt.md` 的内容。
-3. **挂技能**：本仓库作为技能加载（或只挂该角色需要的模块，见[模块归属映射表](agents/模块归属映射表.md)）。
-4. **桌面端拉群**：桌面 app → Bot Mode 面板 → 把这 5 个 profile 注册为 Bot → 创建群聊 → 用户与主编对话，主编按序 `@写手 → @审核官 → (@修复师) → 复审 → .done`。
+**推荐：桌面端 UI 直接建 agent（无需手动建 profile）**
+
+1. **新增 agent**：桌面 app → Bot Mode 面板 → 在当前实例（如 novel）中「新增 agent」，为每个角色建一个。底层自动完成：创建独立 profile + 写入 Bot 标识（`ui_meta.hermes-bots`，含样式与 canonical 会话）+ 克隆当前实例配置（模型/cwd）。
+2. **换 SOUL**：把每个 agent 的 `SOUL.md` 替换为对应角色 `system_prompt.md` 的内容（角色边界 / 铁律 / 交接契约）。
+3. **挂技能**：将本仓库复制为该 profile 的 `skills/ultimate-novel-creation-skill`（或只挂该角色需要的模块，见[模块归属映射表](agents/模块归属映射表.md)）。
+4. **拉群协作**：Bot Mode 中创建群聊，把 5 个 agent 拉入。用户与主编对话，主编按序 `@写手 → @审核官 → (@修复师) → 复审 → .done`。
+
+**备选：CLI 建 profile**
+
+```bash
+hermes profile create novel-writer --clone-from novel --description "小说写手"
+```
+
+然后同样替换 SOUL.md、同步技能；`ui_meta.hermes-bots` 块由桌面端 Bot Mode 识别后自动补全。
+
+> **机制说明**：桌面端「新增 agent」= 新建一个 profile 并启动独立 backend 进程（`hermes --profile <name> serve`）。每个 agent 独立持有 memory / skills / 会话历史，`ui_meta.hermes-bots` 块（shape/color/chat）是 Bot Mode 的识别与显示标识，canonical 「Bot Chat」会话承载 agent 间互 @ 与交接。
 
 ### 三、流水线时序（场景B 继续创作）
 

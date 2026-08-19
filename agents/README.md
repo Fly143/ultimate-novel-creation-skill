@@ -35,9 +35,21 @@
 4. **双向对账**：审核官发现记忆与正文不一致时，按溯源规则判责（新章vs归档→归档错；新章vs历史→翻原文；新章vs设定→查约束源），不默认正文错。
 5. **不越权**：各 Agent 只执行自己职责清单内的工作，其余一律交还主编路由。
 
+## System Prompt 模板（第三方接入）
+
+每个角色目录内附带 `system_prompt.md`（角色版接入提示词模板），供 Claude Code / Cursor / Codex / API 接入 / Dify/Coze 等宿主使用：
+
+- `00_主编_director/system_prompt.md` — 主编（调度）版
+- `01_写手_writer/system_prompt.md` — 写手（写+归档）版
+- `02_审核官_auditor/system_prompt.md` — 审核官（八项审核+双向对账）版
+- `03_修复师_fixer/system_prompt.md` — 修复师（按报告改稿+修记忆）版
+- `04_设定师_setter/system_prompt.md` — 设定师（设定+手动编辑圣经）版
+
+**使用方法**：将对应角色的 system_prompt.md 整段复制到该宿主的 system prompt 位置，同时把角色目录的 `SKILL.md` 作为技能加载。模板不预设创作偏好（题材/字数/风格在项目初始化时由设定师询问用户）。
+
 ## 部署说明（Hermes 桌面端 Bot Mode）
 
 1. 为每个角色创建一个 profile（或 Bot），`cwd` 指向小说工程根目录（如 `D:/小说`）。
-2. 每个 Agent 的 SOUL.md / 系统提示指向本仓库对应角色目录的 `SKILL.md`。
+2. 每个 Agent 的 SOUL.md / 系统提示指向本仓库对应角色目录的 `SKILL.md`（Hermes 内）或 `system_prompt.md`（第三方宿主）。
 3. 拉群后由主编 Agent 承接用户对话，按时序显式 @ 呼叫其他 Agent。
 4. 共享资源（modules/references/templates/memory-system）保持在本仓库根目录，各 Agent 按需读取。

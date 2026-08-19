@@ -30,7 +30,7 @@
 
 **推荐：桌面端 UI 直接建 agent（无需手动建 profile）**
 
-1. **新增 agent**：桌面 app → Bot Mode 面板 → 在当前实例（如 novel）中「新增 agent」，为每个角色建一个。底层自动完成：创建独立 profile + 写入 Bot 标识（`ui_meta.hermes-bots`，含样式与 canonical 会话）+ 克隆当前实例配置（模型/cwd）。
+1. **新增 agent**：桌面 app → Bot Mode 面板 → 在当前实例中「新增 agent」，为 5 个角色各建一个（profile 目录名任意，如 `director`/`writer`/`auditor`/`fixer`/`setter` 或 `novel` 系均可）。底层自动完成：创建独立 profile + 写入 Bot 标识（`ui_meta.hermes-bots`，含样式与 canonical 会话）+ 克隆当前实例配置（模型/cwd）。脚本按目录名自动识别角色，无需固定命名。
 2. **换 SOUL**：把每个 agent 的 `SOUL.md` 替换为对应角色 `system_prompt.md` 的内容（角色边界 / 铁律 / 交接契约）。
 3. **挂技能**：将本仓库复制为该 profile 的 `skills/ultimate-novel-creation-skill`（或只挂该角色需要的模块，见[模块归属映射表](agents/模块归属映射表.md)）。
 4. **拉群协作**：Bot Mode 中创建群聊，把 5 个 agent 拉入。用户与主编对话，主编按序 `@写手 → @审核官 → (@修复师) → 复审 → .done`。
@@ -38,7 +38,7 @@
 **备选：CLI 建 profile**
 
 ```bash
-hermes profile create novel-writer --clone-from novel --description "小说写手"
+hermes profile create writer --description "小说写手"   # 目录名任意，sync 脚本按名自动识别角色
 ```
 
 然后同样替换 SOUL.md、同步技能；`ui_meta.hermes-bots` 块由桌面端 Bot Mode 识别后自动补全。
@@ -52,14 +52,16 @@ hermes profile create novel-writer --clone-from novel --description "小说写�
 - 更新技能时**不要手动逐个改**，用同步脚本一键分发（**技能 + SOUL 一起同步**）：
 
 ```bash
-bash sync_agents.sh              # 同步到全部 novel 系 profile（novel + 4 角色）
-bash sync_agents.sh novel-writer # 只同步指定 profile
-bash sync_agents.sh --dry-run    # 先预览
+bash sync_agents.sh              # 同步到全部已识别的 profile（按目录名自动识别角色）
+bash sync_agents.sh writer        # 只同步指定 profile（须存在于 profiles 根目录）
+bash sync_agents.sh --dry-run     # 先预览将同步哪些 profile
+# 角色无法自动识别时可用 <profile>=<角色目录> 强制映射，例：
+bash sync_agents.sh writer=01_写手_writer
 ```
 
 脚本将仓库（唯一事实源）整体覆盖到各 profile 的技能目录，并**从 `agents/<角色>/system_prompt.md` 重新生成各 profile 的 `SOUL.md`**（角色 SOUL 的权威来源是仓库，本地不要手改 SOUL——改了也会被脚本覆盖）。**改技能/人格的正确姿势**：先在仓库改（SKILL.md / system_prompt.md）→ commit/push → 跑 `sync_agents.sh` 分发到各 agent。
 
-> **人格说明**：主编（novel）默认融合「小爱同学」创作导师人格（十年网文经验资深小说家），定义在 `agents/00_主编_director/system_prompt.md`，部署时自动进入 SOUL。不需要可删减该节。
+> **人格说明**：主编（任意实例名，如 `director` 或 `novel`）默认融合「小爱同学」创作导师人格（十年网文经验资深小说家），定义在 `agents/00_主编_director/system_prompt.md`，部署时自动进入 SOUL。不需要可删减该节。
 
 ### 四、流水线时序（场景B 继续创作）
 

@@ -31,18 +31,18 @@ version: 1.0.0
 ## 二、职责清单
 
 ### 1. 项目初始化（场景A 新开小说）
-按 `modules/05_01_功能模块.md`：
+按 `modules/03_01_功能模块.md`：
 1. 生成书名（参考 `references/书名生成策略.md`）
 2. 创建立项定位单（`templates/立项定位单模板.md`）+ 推荐创作模式
 3. **初始化记忆系统**（复制 memory-system 模板到 `[书名]/记忆系统/`，含圣经五件套/摘要/阶段/卷）
 4. 文风设定（`templates/文风设定模板.md`，如用户要求可跑 `scripts/fingerprint.py` 指纹）
 
 ### 2. 设定生成
-- 世界观 → `modules/05_02_功能模块.md` + `templates/世界观设定文档.md`
-- 人物 → `modules/05_03_功能模块.md` + `templates/人设卡模板.md`、`templates/人物关系图谱模板.md`
-- 大纲 → `modules/05_04_功能模块.md` + `templates/情节大纲模板.md`、`templates/章节规划表.md`、`templates/百万字规划模板.md`
-- 批量设定（配角/支线/反派）→ `modules/05_20_功能模块.md`
-- 导入已有小说 → `modules/05_27_功能模块.md`（反向解析为标准项目）
+- 世界观 → `modules/03_02_功能模块.md` + `templates/世界观设定文档.md`
+- 人物 → `modules/03_03_功能模块.md` + `templates/人设卡模板.md`、`templates/人物关系图谱模板.md`
+- 大纲 → `modules/03_04_功能模块.md` + `templates/情节大纲模板.md`、`templates/章节规划表.md`、`templates/百万字规划模板.md`
+- 批量设定（配角/支线/反派）→ `modules/03_20_功能模块.md`
+- 导入已有小说 → `modules/03_27_功能模块.md`（反向解析为标准项目）
 
 ### 3. 手动编辑圣经（18C，用户触发「更新人设」「改伏笔」「编辑圣经」）
 - **以用户口径为准**重写圣经对应段落（人物卡/伏笔/时间线/角色数据库）。

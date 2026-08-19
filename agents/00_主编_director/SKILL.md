@@ -8,9 +8,9 @@ version: 1.0.0
 
 ## 📌 前置必读（本角色 SKILL 加载后立即执行，不可跳过）
 
-1. **文件路径约定**：本技能内所有 `modules/`、`references/`、`templates/`、`memory-system/` 引用均相对于**本技能根目录**（即 `skills/ultimate-novel-creation-skill/`）；带 `[书名]/` 前缀的路径（如 `[书名]/记忆系统/`）相对于**当前工作目录（项目目录）**。`memory-system/xxx`（无前缀）= 技能内只读模板；`[书名]/记忆系统/xxx`（有前缀）= 项目读写副本。完整约定见根 `SKILL.md`「文件路径约定」节。
-2. **强制协议**：加载后立即读取 `modules/00_强制执行协议.md`，作为流程唯一权威，不得跳过或简化。
-3. **技能根目录定位**：运行时若无法确定技能根目录，从本文件向上定位至同时含 `modules/`、`templates/`、`agents/` 的目录即为技能根。
+1. **技能根目录定位**：运行时若无法确定技能根目录，从本文件向上定位至同时含 `modules/`、`templates/`、`agents/` 的目录即为技能根（即 `skills/ultimate-novel-creation-skill/`）。若宿主只加载了根 `SKILL.md`（单体版入口），按根 SKILL 的「多 Agent 部署分流」节定位并加载本文件 `agents/00_主编_director/SKILL.md` 后再执行。
+2. **文件路径约定**：本技能内所有 `modules/`、`references/`、`templates/`、`memory-system/` 引用均相对于**本技能根目录**（即 `skills/ultimate-novel-creation-skill/`）；带 `[书名]/` 前缀的路径（如 `[书名]/记忆系统/`）相对于**当前工作目录（项目目录）**。`memory-system/xxx`（无前缀）= 技能内只读模板；`[书名]/记忆系统/xxx`（有前缀）= 项目读写副本。完整约定见根 `SKILL.md`「文件路径约定」节（仅作路径参考，不执行其单体版流程）。
+3. **强制协议**：加载后立即读取 `modules/00_强制执行协议.md`，作为流程唯一权威，不得跳过或简化（多 Agent 模式下由你负责整体路由，其余角色按各自职责读取相关章节）。
 
 ---
 

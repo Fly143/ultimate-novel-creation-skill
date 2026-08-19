@@ -38,9 +38,9 @@
 
 **推荐：桌面端 UI 直接建 agent（无需手动建 profile）**
 
-1. **新增 agent**：桌面 app → Bot Mode 面板 → 在当前实例中「新增 agent」，为 5 个角色各建一个（profile 目录名任意，如 `director`/`writer`/`auditor`/`fixer`/`setter` 或 `novel` 系均可）。底层自动完成：创建独立 profile + 写入 Bot 标识（`ui_meta.hermes-bots`，含样式与 canonical 会话）+ 克隆当前实例配置（模型/cwd）。脚本按目录名自动识别角色，无需固定命名。
-2. **换 SOUL**：把每个 agent 的 `SOUL.md` 替换为对应角色 `system_prompt.md` 的内容（角色边界 / 铁律 / 交接契约）。
-3. **挂技能**：将本仓库复制为该 profile 的 `skills/ultimate-novel-creation-skill`（或只挂该角色需要的模块，见[模块归属映射表](agents/模块归属映射表.md)）。
+1. **新增 agent**：桌面 app → Bot Mode 面板 → 在当前实例中「新增 agent」，为 5 个角色各建一个（profile 目录名任意，如 `director`/`writer`/`auditor`/`fixer`/`setter` 或 `novel` 系均可）。底层自动完成：创建独立 profile（`%LOCALAPPDATA%\hermes\profiles\<名>\`）+ 克隆当前实例配置（模型/cwd）。sync 脚本按目录名自动识别角色，无需固定命名。
+2. **换 SOUL**：把每个 agent 的 `SOUL.md` 替换为对应角色 `system_prompt.md` 的内容（角色边界 / 铁律 / 交接契约）——**推荐直接用同步脚本一键完成**（见下节，脚本会从 `agents/<角色>/system_prompt.md` 自动生成带角色名的 SOUL.md）。
+3. **挂技能**：将本仓库复制为该 profile 的 `skills/ultimate-novel-creation-skill`（或只挂该角色需要的模块，见[模块归属映射表](agents/模块归属映射表.md)）——同步脚本同样一键完成。
 4. **拉群协作**：Bot Mode 中创建群聊，把 5 个 agent 拉入。用户与主编对话，主编按序 `@写手 → @审核官 → (@修复师) → 复审 → .done`。
 
 **备选：CLI 建 profile**
@@ -49,9 +49,9 @@
 hermes profile create writer --description "小说写手"   # 目录名任意，sync 脚本按名自动识别角色
 ```
 
-然后同样替换 SOUL.md、同步技能；`ui_meta.hermes-bots` 块由桌面端 Bot Mode 识别后自动补全。
+然后运行 `bash sync_agents.sh` 一键完成 SOUL 替换 + 技能挂载。
 
-> **机制说明**：桌面端「新增 agent」= 新建一个 profile 并启动独立 backend 进程（`hermes --profile <name> serve`）。每个 agent 独立持有 memory / skills / 会话历史，`ui_meta.hermes-bots` 块（shape/color/chat）是 Bot Mode 的识别与显示标识，canonical 「Bot Chat」会话承载 agent 间互 @ 与交接。
+> **机制说明**：桌面端「新增 agent」= 新建一个 profile 并启动独立 backend 进程（`hermes --profile <name> serve`）。每个 agent 独立持有 memory / skills / 会话历史，Bot Mode 通过 profile 隔离识别各 agent，canonical 「Bot Chat」会话承载 agent 间互 @ 与交接。
 
 ### 三、技能副本与同步（重要）
 
@@ -332,8 +332,8 @@ bash sync_agents.sh writer=01_写手_writer
 │   ├── 02_审核官_auditor/ # 🔍 审核官
 │   ├── 03_修复师_fixer/   # 🔧 修复师
 │   └── 04_设定师_setter/  # 📋 设定师（总览与部署说明见本文件上文）
-├── modules/              # 32 个模块文件（27 功能模块 + 5 核心协议/规范）
-├── references/           # 11+2 个精选写作参考（含 rulesets/ 子目录）
+├── modules/              # 30 个模块文件（27 功能模块 03_01~03_27 + 3 核心协议/规范 00/01/02）
+├── references/           # 12+3 个精选写作参考（含 rulesets/ 子目录）
 ├── templates/            # 13+3 个输出模板（含 constraints/ 子目录）
 └── memory-system/        # 记忆系统模板（skill 内只读）
     ├── bible/            # 故事圣经 / 人物弧线 / 剧情时间线 / 伏笔清单 / 角色数据库
@@ -353,7 +353,7 @@ bash sync_agents.sh writer=01_写手_writer
 - **Bible 文档增长控制**：超 30KB 自动压缩远古内容，细节下沉到卷压缩，按需回读
 - **五道生成门禁**：引用校验/一致性校验/蓝图出场校验/未知实体检测/描写一致性，不通过不视为完成
 - **风格质量检查**：语言风格统一性/叙述视角一致性/文风成熟度（03_13，并入全量审核子代理 U 的 F 项）
-- **11+2 个精选写作参考**：爽文理论、爽点设计、黄金开篇、风格技巧、打斗场景、高级写作技法、规则集系统（通用默认+赛博-技术流，支持自定义）
+- **12+3 个精选写作参考**：爽文理论、爽点设计、黄金开篇、风格技巧、打斗场景、高级写作技法、规则集系统（通用默认+赛博-技术流，支持自定义）
 - **13+3 个精选模板**：立项定位单、文风设定、世界观、人设卡、人物关系、情节大纲、章节规划、单章结构、质量检查、约束系统（金手指/时间/叙事线）等
 
 ## 快速开始（单体模式）

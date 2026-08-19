@@ -26,7 +26,7 @@
 #   bash sync_agents.sh                 # 同步到全部已识别的 profile
 #   bash sync_agents.sh --dry-run       # 仅预览
 #   bash sync_agents.sh <profile名>     # 只同步指定 profile（须存在于 PROFILES_ROOT）
-#   bash sync_agents.sh <profile名>=<角色目录名>   # 强制映射，例如 writer=01_写手_writer
+#   bash sync_agents.sh <profile名>=<角色目录名>   # 只同步该 profile 并强制映射角色，例如 writer=01_写手_writer
 #
 # 注意：目标会被整体覆盖（rm -rf + cp），确保目标 profile 存在。
 # ============================================================
@@ -64,6 +64,7 @@ for arg in "$@"; do
   if [[ "$arg" == *"="* ]]; then
     p="${arg%%=*}"; r="${arg#*=}"
     FORCE_MAP["$p"]="$r"
+    if [[ -z "$SINGLE_TARGET" ]]; then SINGLE_TARGET="$p"; fi   # 带映射的 profile 名即目标
   else
     SINGLE_TARGET="$arg"
   fi

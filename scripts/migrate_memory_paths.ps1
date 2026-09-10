@@ -128,5 +128,7 @@ if(-not $Apply){
     Write-Host "========== 预览完成：共 $totalMoves 项待迁移。确认无误后加 -Apply 执行。 ==========" -ForegroundColor Cyan
 } else {
     Write-Host "========== 迁移完成：共 $totalMoves 项已迁移。 ==========" -ForegroundColor Green
-    Write-Host "提示：迁移后旧项目的『完成步骤』/报告文件命名不受影响；正文无需改动。若项目内自定义文档引用了旧路径，请手动更新。" -ForegroundColor Yellow
+    Write-Host "提示：迁移后旧项目的报告文件命名不受影响；正文无需改动。若项目内自定义文档引用了旧路径，请手动更新。" -ForegroundColor Yellow
+    Write-Host "      另：v9.5.18 起正文不再追加元数据块（改存 报告/第NNN章_章节档案.md），旧章节无需迁移；" -ForegroundColor Yellow
+    Write-Host "      旧正文明细里的『完成步骤』字段已废除（完成状态只认 .done/ 空标记），可忽略。" -ForegroundColor Yellow
 }

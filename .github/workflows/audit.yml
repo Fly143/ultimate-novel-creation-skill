@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   audit:
-    name: 引用/孤儿/版本/路径审计
+    name: 引用/孤儿/版本/路径审计（收紧孤儿判定 + 术语/行号警告）
     runs-on: windows-latest
     steps:
       - name: 检出代码
@@ -19,5 +19,7 @@ jobs:
       - name: 运行完整性审计
         shell: pwsh
         run: |
-          pwsh .github/scripts/audit.ps1 -Root $PWD
+          # -StrictOrphan: 孤儿判定要求「存在指向该资产路径的引用」（堵住裸名与项目侧同名的漏报）
+          # -LintTerm / -LintLineRef: 裸英文术语与裸行号引用，仅警告不阻断
+          pwsh .github/scripts/audit.ps1 -Root . -StrictOrphan -LintTerm -LintLineRef
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

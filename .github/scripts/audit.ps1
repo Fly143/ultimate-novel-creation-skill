@@ -1,15 +1,27 @@
 ﻿# ============================================================
 # 全能小说作家 - CI 完整性审计脚本（GitHub Actions 调用）
 # 检查：①死引用 ②孤儿文件 ③版本号一致性(SKILL vs README徽章) ④残留英文路径token
-# 用法：pwsh .github/scripts/audit.ps1 -Root <仓库路径>
+#      ⑤裸英文术语(警告) ⑥裸行号引用(警告)
+# 用法：pwsh .github/scripts/audit.ps1 -Root <仓库路径> [-StrictOrphan] [-LintTerm] [-LintLineRef]
+#   -StrictOrphan : 孤儿判定收紧为「必须存在指向该资产路径的引用」（默认关闭，便于渐进收紧）
+#   -LintTerm     : 额外检查裸英文术语 volume/phase/stage/summary（仅警告，不阻断）
+#   -LintLineRef  : 额外检查「第N行」式行号引用（仅警告，不阻断）
 # 发现问题输出清单并 exit 1（CI 失败）；全部通过 exit 0。
 # ============================================================
 param(
-    [string]$Root = (Get-Location).Path
+    [string]$Root = (Get-Location).Path,
+    [switch]$StrictOrphan,
+    [switch]$LintTerm,
+    [switch]$LintLineRef
 )
 
 $enc = New-Object System.Text.UTF8Encoding($false)
 $errors = @()
+$warns = @()
+
+# 归一化 Root 为绝对路径：后续用 $Root.Length 做 Substring 截取相对路径，
+# 传相对路径（如 -Root .）会导致路径错位、全部检查失效。
+$Root = (Resolve-Path -LiteralPath $Root).Path.TrimEnd('\','/')
 
 # ---------- ① 死引用审计 ----------
 $files = Get-ChildItem -Recurse -File $Root -Filter *.md | ForEach-Object { $_.FullName.Substring($Root.Length+1) -replace '\\','/' }
@@ -80,16 +92,53 @@ Get-ChildItem -Recurse -File $Root -Filter *.md | ForEach-Object {
   $rel = $_.FullName.Substring($Root.Length+1) -replace '\\','/'
   $allText[$rel] = [System.IO.File]::ReadAllText($_.FullName, $enc)
 }
-$orphans = @()
-foreach($f in $files){
-  if($f -match '^(README|LICENSE|\.gitignore)'){ continue }
-  if($f -like '.github/*'){ continue }   # .github/ 为维护者工具/文档，无需被 skill 内容引用
-  $base = [System.IO.Path]::GetFileName($f); $fwd = $f -replace '\\','/'
-  $hits = 0
-  foreach($k in $allText.Keys){ if($k -ne $fwd -and ($allText[$k].Contains($base) -or $allText[$k].Contains($fwd))){ $hits++ } }
-  if($hits -eq 0){ $orphans += $fwd }
+
+if($StrictOrphan){
+  # 收紧版：必须存在「带目录前缀、指向该资产路径」的引用。
+  # 旧版用「裸文件名是否出现在任意文档」判定，会被与项目侧产物同名的裸名（如 进度看板.md、
+  # 创作状态追踪表.md）骗过而漏报——那类模板名字在仓库里到处都是，却可能无人真正引用。
+  $orphans = @()
+  $docRoots = @('README.md','LICENSE','.gitignore','SKILL.md','system_prompt.md')
+  # 可解析资产清单（排除 .git）
+  $allFiles = Get-ChildItem -Recurse -File $Root | ForEach-Object { $_.FullName.Substring($Root.Length+1) -replace '\\','/' }
+  $assetSet = @{}; foreach($a in $allFiles){ if($a -notlike '.git/*'){ $assetSet[$a] = $true } }
+  # 引用前缀目录白名单（与 skill 资产目录一致）
+  $strictDirs = @('modules','references','templates','memory-system','agents','scripts','templates/constraints','references/rulesets')
+  $strictDirsCn = @('模块','参考资源','模板','圣经','摘要','阶段','卷','约束')
+  $strictPre = '(?:' + (($strictDirs + $strictDirsCn) -join '|') + ')'
+  # 引用形态：<白名单目录>/<文件名>.md —— 要求 .md 前有 '/'，故「(模板：xxx.md)」这类裸名不计入
+  $strictRe = "(?<![A-Za-z0-9_/-])($strictPre)/[^\s``，。；:：)\]】》:'\"" ]+\.md"
+  $refs = @{}
+  foreach($k in $allText.Keys){
+    foreach($m in [regex]::Matches($allText[$k], $strictRe)){
+      $c = $m.Value -replace '^\./','' -replace '[\.,;:，。；：、）)】》」』\]\["''`]+$',''
+      # 只取最长匹配（避免 templates/constraints/x.md 被记成 constraints/x.md）
+      if($c -match '/' -and -not $refs.ContainsKey($c)){ $refs[$c] = $true }
+    }
+  }
+  foreach($f in $files){
+    if($docRoots -contains $f){ continue }
+    if($f -like '.github/*'){ continue }        # 维护者工具，无需被 skill 内容引用
+    if($f -like 'modules/*'){ continue }        # 模块为主动加载入口，由 00 协议/索引引用
+    if(-not $refs.ContainsKey($f)){ $orphans += $f }
+  }
+  if($orphans.Count){
+    $errors += "孤儿文件（不存在指向该资产路径的引用）："
+    $orphans | Sort-Object | ForEach-Object { $errors += "  $_" }
+  }
+} else {
+  # 兼容版（默认）：文件名出现在任意文档中即视为已引用
+  $orphans = @()
+  foreach($f in $files){
+    if($f -match '^(README|LICENSE|\.gitignore)'){ continue }
+    if($f -like '.github/*'){ continue }   # .github/ 为维护者工具/文档，无需被 skill 内容引用
+    $base = [System.IO.Path]::GetFileName($f); $fwd = $f -replace '\\','/'
+    $hits = 0
+    foreach($k in $allText.Keys){ if($k -ne $fwd -and ($allText[$k].Contains($base) -or $allText[$k].Contains($fwd))){ $hits++ } }
+    if($hits -eq 0){ $orphans += $fwd }
+  }
+  if($orphans.Count){ $errors += "孤儿文件：" ; $orphans | ForEach-Object { $errors += "  $_" } }
 }
-if($orphans.Count){ $errors += "孤儿文件：" ; $orphans | ForEach-Object { $errors += "  $_" } }
 
 # ---------- ③ 版本号一致性 ----------
 $skillVer = ''
@@ -115,12 +164,67 @@ Get-ChildItem -Recurse -File $Root -Filter *.md | ForEach-Object {
 }
 if($tokens.Count){ $errors += "残留英文记忆系统路径 $($tokens.Count) 处：" ; $tokens | Select-Object -Unique | ForEach-Object { $errors += "  $_" } }
 
+# ---------- ⑤ 裸英文术语（警告，不阻断）----------
+if($LintTerm){
+  # v9.4.0 已声称记忆系统路径中文化，但散文里的英文术语漏改过（volume/phase/stage/summaries）。
+  # 排除：代码围栏内内容、.done 标记名（受文件系统约束不可改，且已不在检查词表内）
+  $termRe = '(?<![A-Za-z_/-])(volume|phase|stage|summaries)(?![A-Za-z_])'
+  $termHits = @()
+  Get-ChildItem -Recurse -File $Root -Filter *.md | ForEach-Object {
+    $rel = $_.FullName.Substring($Root.Length+1)
+    if($rel -like '.github/*'){ return }
+    $lines = [System.IO.File]::ReadAllLines($_.FullName, $enc)
+    $inFence = $false
+    for($i=0;$i -lt $lines.Count;$i++){
+      $ln = $lines[$i]
+      if($ln -match '^\s*(```|~~~)'){ $inFence = -not $inFence; continue }
+      if($inFence){ continue }
+      if($ln -match '→|->'){ continue }   # 路径映射表（如 summaries→摘要）本就需要英文原名，豁免
+      if($ln -match $termRe){ $termHits += "$rel :$($i+1) 裸英文术语 '$($Matches[1])'" }
+    }
+  }
+  if($termHits.Count){
+    $warns += "裸英文术语 $($termHits.Count) 处（建议中文化：卷压缩/阶段压缩/单章摘要）："
+    $termHits | Select-Object -Unique | ForEach-Object { $warns += "  $_" }
+  }
+}
+
+# ---------- ⑥ 裸行号引用（警告，不阻断）----------
+if($LintLineRef){
+  # 用「第 N 行」定位文档内容极易因增删行而失准（CI 无法发现）。改用节名/标题引用。
+  $lineHits = @()
+  Get-ChildItem -Recurse -File $Root -Filter *.md | ForEach-Object {
+    $rel = $_.FullName.Substring($Root.Length+1)
+    if($rel -like '.github/*'){ return }
+    $lines = [System.IO.File]::ReadAllLines($_.FullName, $enc)
+    $inFence = $false
+    for($i=0;$i -lt $lines.Count;$i++){
+      $ln = $lines[$i]
+      if($ln -match '^\s*(```|~~~)'){ $inFence = -not $inFence; continue }
+      if($inFence){ continue }
+      # 只查「定位文档结构」的语境，避开写作指标（如「每千字」「第 N 章」）
+      if($ln -match '第\s*\d+\s*[-–~到至]\s*\d+\s*行' -or $ln -match '(总流程|本文件|上文|下文|步骤表).{0,10}第\s*\d+\s*行'){
+        $lineHits += "$rel :$($i+1) 裸行号引用"
+      }
+    }
+  }
+  if($lineHits.Count){
+    $warns += "裸行号引用 $($lineHits.Count) 处（增删行即失准，建议改为节名引用）："
+    $lineHits | Select-Object -Unique | ForEach-Object { $warns += "  $_" }
+  }
+}
+
 # ---------- 汇总 ----------
+$warnGroups = 0
+if($warns.Count){ $warnGroups = @($warns | Where-Object { $_ -notmatch '^\s\s' }).Count }
 if($errors.Count){
   Write-Output "❌ 审计未通过："
   $errors | ForEach-Object { Write-Output $_ }
+  if($warns.Count){ Write-Output ""; Write-Output "⚠️ 另有警告 $warnGroups 组（不阻断）："; $warns | ForEach-Object { Write-Output $_ } }
   exit 1
 } else {
-  Write-Output "✅ 审计全部通过：死引用 0 / 孤儿 0 / 版本一致($skillVer) / 无残留英文路径"
+  $orphanNote = if($StrictOrphan){ "孤儿 0（收紧判定）" } else { "孤儿 0（兼容判定）" }
+  Write-Output "✅ 审计全部通过：死引用 0 / $orphanNote / 版本一致($skillVer) / 无残留英文路径"
+  if($warns.Count){ Write-Output ""; Write-Output "⚠️ 警告 $warnGroups 组（不阻断）："; $warns | ForEach-Object { Write-Output $_ } }
   exit 0
 }

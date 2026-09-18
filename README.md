@@ -259,7 +259,7 @@ v9.6.0 写后流水线要点：
 ├── references/           # 13+3 个精选写作参考（含 rulesets/ 规则集子目录）
 ├── templates/            # 15+3 个输出模板（含 constraints/ 约束模板子目录）
 ├── scripts/              # 指纹/词频统计（py/perl/pwsh 多实现同口径）+ 旧项目路径迁移
-├── .github/              # 维护者工具：workflows/audit.yml（push/PR 自动跑审计）+ scripts/audit.ps1 + SMOKE_TEST.md 验收清单
+├── .github/              # 维护者工具：workflows/audit.yml + scripts/audit.ps1 + SMOKE_TEST.md + specs/（开发规格，不进 skill 运行时）
 └── memory-system/        # 记忆系统模板（skill 内只读，中英对照见 SKILL.md）
     ├── bible/            # 故事圣经 → 故事圣经/人物弧线/剧情时间线/伏笔清单/角色数据库
     ├── summaries/        # 单章摘要模板

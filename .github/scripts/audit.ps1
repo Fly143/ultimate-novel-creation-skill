@@ -103,7 +103,7 @@ if($StrictOrphan){
   $allFiles = Get-ChildItem -Recurse -File $Root | ForEach-Object { $_.FullName.Substring($Root.Length+1) -replace '\\','/' }
   $assetSet = @{}; foreach($a in $allFiles){ if($a -notlike '.git/*'){ $assetSet[$a] = $true } }
   # 引用前缀目录白名单（与 skill 资产目录一致）
-  $strictDirs = @('modules','references','templates','memory-system','agents','scripts','templates/constraints','references/rulesets')
+  $strictDirs = @('modules','references','templates','memory-system','agents','scripts','templates/constraints','references/rulesets','docs','docs/compose','docs/compose/spec')
   $strictDirsCn = @('模块','参考资源','模板','圣经','摘要','阶段','卷','约束')
   $strictPre = '(?:' + (($strictDirs + $strictDirsCn) -join '|') + ')'
   # 引用形态：<白名单目录>/<文件名>.md —— 要求 .md 前有 '/'，故「(模板：xxx.md)」这类裸名不计入

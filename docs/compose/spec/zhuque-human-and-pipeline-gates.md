@@ -3,7 +3,7 @@ feature: zhuque-human-and-pipeline-gates
 status: delivered
 updated: 2026-02-14
 branch: fix/zhuque-human-and-pipeline-gates
-commits: ce4e97d..HEAD # filled at delivery
+commits: ce4e97d..86607cb # filled at delivery
 ---
 
 # 朱雀人工为主 + 写后流水线硬门禁

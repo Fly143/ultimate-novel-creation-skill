@@ -22,10 +22,10 @@ commits: ce4e97d..e080f44 # filled at delivery
 **Journey log** —  
 1. 本地未提交的朱雀优化在 `git reset --hard origin/main` 后被丢弃；远程 origin/main **没有** 4.1e，需从零写入而非增量改。  
 2. `git worktree add` 被会话隔离策略拦截 → 改为在 skill 仓库本分支开发（用户已选「原地覆盖+功能分支」）。  
-3. 审计把 `docs/compose/` 下的规格 markdown 判为孤儿 → README 项目结构节挂上规格路径。  
+3. 规格若放在 skill 根下的开发文档目录，StrictOrphan 会误报孤儿；最终迁入维护者目录 `.github/specs`（CI 对 .github 做孤儿豁免）。  
 4. 第一轮审查暴露「定义层已加 zhuque、操作层 §4.2 仍可绕过」——仅改清单不够，必须改快乐路径步骤顺序。  
 5. 宿主无 `pwsh` 时用 `powershell.exe` 跑 audit.ps1。
-6. 开发规格放 skill 内 `docs/` 会污染加载面且触发 StrictOrphan；最终移入 `.github/specs/`（维护者目录，CI 豁免孤儿判定）。
+6. 开发规格放在 skill 运行时目录会污染加载面，并触发 StrictOrphan；最终放入 `.github/specs` 维护者目录。
 
 ## [S1] Problem
 

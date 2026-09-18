@@ -1,9 +1,9 @@
-﻿---
+---
 feature: zhuque-human-and-pipeline-gates
 status: delivered
-updated: 2026-02-14
+updated: 2026-09-18
 branch: fix/zhuque-human-and-pipeline-gates
-commits: ce4e97d..e080f44 # filled at delivery
+commits: ce4e97d..HEAD # delivery + review consistency fixes
 ---
 
 # 朱雀人工为主 + 写后流水线硬门禁
@@ -12,12 +12,14 @@ commits: ce4e97d..e080f44 # filled at delivery
 
 **What was built** — 基于 origin/main（ce4e97d）覆盖本地 skill 后，在分支 `fix/zhuque-human-and-pipeline-gates` 上落地 v9.6.0：  
 1）**朱雀「人工为主」**：写前 03_06 人工特征种子硬配额（感官/无用细节/结构不完美/低概率表达/对话毛刺）；写后 03_26 4.1e 人工证据包（人工段≥2段/约≥300字 + 高疑似段重生 + 结构破坏 + 对话毛刺），验收目标为三态中「人工创作特征」**严格大于**「疑似AI」；疑似≥人工时强制强化轮并禁止宣称检测通过；修复子代理禁止整段重写人工注入段。  
-2）**写后流水线硬门禁**：00/SKILL/03_26 对齐章节完成定义（`.done_zhuque` 闭环必需）；漏步自愈矩阵覆盖只交正文/跳U/跳朱雀/跳记忆/缺回执/未闭环写N+1/delegate失败/半程收尾等；「继续/下一章」前置闸门先查上一章 `.done`；03_26 §4.2/§4.3 操作路径强制「先 4.1b–4.1e → zhuque.done → 才 chapter」；结束必须输出【第NNN章状态】回执。
+2）**写后流水线硬门禁**：00/SKILL/03_26 对齐章节完成定义（`.done_zhuque` 闭环必需）；漏步自愈矩阵覆盖只交正文/跳U/跳朱雀/跳记忆/缺回执/未闭环写N+1/delegate失败/半程收尾等；「继续/下一章」前置闸门先查上一章 `.done`；03_26 §4.2/§4.3 操作路径强制「先 4.1b–4.1e → zhuque.done → 才 chapter」；结束必须输出【第NNN章状态】回执。  
+3）**一致性补丁（审阅后）**：统一写后顺序为「U → 先朱雀 4.1b–4.1e → `.done_zhuque` → 再修复」；SKILL frontmatter 补触发词；修复大幅改动后强制补跑 4.1e 自查。
 
 **Verification** —  
 - `powershell -File .github/scripts/audit.ps1 -Root <repo>` → PASS（死引用0 / 孤儿0 / 版本9.6.0 / 无残留英文路径）  
-- 一致性抽查：SKILL/00/03_06/03_26/system_prompt/清单/朱雀对策/高级写作技巧/README 均含「人工为主」与 zhuque 门禁；03_26 §4.2/§4.3 含「先执行4.1b–4.1e」「禁止只标U七项就写chapter」  
-- 独立审查第一轮：AC1/3/4/5 MET，AC2 因 §4.2/§4.3 漏 zhuque 判 PARTIAL → 已修复关键项并补残余 one-liner → 复审确认
+- 一致性抽查：SKILL/00/03_06/03_26/system_prompt/清单/朱雀对策/高级写作技巧/README 均含「人工为主」与 zhuque 门禁；**写后顺序以 03_26 为准，00/system_prompt/README/SKILL 已对齐「先朱雀后修复」**；03_26 §4.2/§4.3 含「先执行4.1b–4.1e」「禁止只标U七项就写chapter」  
+- 独立审查第一轮：AC1/3/4/5 MET，AC2 因 §4.2/§4.3 漏 zhuque 判 PARTIAL → 已修复关键项并补残余 one-liner → 复审确认  
+- 第二轮人工审阅：发现 00/system_prompt/README 与 03_26 步骤4 顺序互斥、frontmatter 缺触发词 → 已在本分支修复
 
 **Journey log** —  
 1. 本地未提交的朱雀优化在 `git reset --hard origin/main` 后被丢弃；远程 origin/main **没有** 4.1e，需从零写入而非增量改。  
@@ -25,7 +27,8 @@ commits: ce4e97d..e080f44 # filled at delivery
 3. 规格若放在 skill 根下的开发文档目录，StrictOrphan 会误报孤儿；最终迁入维护者目录 `.github/specs`（CI 对 .github 做孤儿豁免）。  
 4. 第一轮审查暴露「定义层已加 zhuque、操作层 §4.2 仍可绕过」——仅改清单不够，必须改快乐路径步骤顺序。  
 5. 宿主无 `pwsh` 时用 `powershell.exe` 跑 audit.ps1。
-6. 开发规格放在 skill 运行时目录会污染加载面，并触发 StrictOrphan；最终放入 `.github/specs` 维护者目录。
+6. 开发规格放在 skill 运行时目录会污染加载面，并触发 StrictOrphan；最终放入 `.github/specs` 维护者目录。  
+7. 第二轮审阅暴露「00 写强制序=修复→朱雀，03_26=先朱雀→修复」——以 03_26 为唯一顺序权威并回写其余文件。
 
 ## [S1] Problem
 
@@ -56,7 +59,8 @@ commits: ce4e97d..e080f44 # filled at delivery
   1. **写前人工种子**（03_06）：每章正文生成时即满足可量化的人工痕迹配额，而不是写完再靠润色。
   2. **写后人工证据包**（03_26 4.1e）：每章闭环前必须完成人工段注入 +（如触发）高疑似段重生 + 结构破坏 + 对话毛刺自查，并写 `.done_zhuque`。
   3. **禁止 AI 改 AI**：全文二次润色禁令；修复只允许针对报告点名段落；人工注入段写入后禁止整段重写。
-  4. **强化轮**：用户回传朱雀结果若仍疑似 ≥ 人工 → 执行「人工证据强化轮」，不得宣称完成。
+  4. **强化轮**：用户回传朱雀结果若仍疑似 ≥ 人工 → 执行「人工证据强化轮」，不得宣称完成。  
+  5. **顺序**：U 之后**先**跑 4.1b–4.1e 并写 zhuque，**再**修复（人工段先落地，修复才有禁令对象）。
 
 ### D2 写前人工种子（03_06 写作要求，每章硬配额）
 
@@ -81,13 +85,14 @@ commits: ce4e97d..e080f44 # filled at delivery
 | P0 | 高疑似段重生 | 报告/分布显示高疑似段时 ≥1 段整段重生（换切入/视角/信息顺序），禁止同义补丁 |
 | P1 | 结构破坏 | 全章至少 1 处（跳时间/少过渡/未解释残留/禁止段段总结） |
 | P1 | 对话毛刺 | 对话为主章必查：口癖/打断/半句/夹动作 |
-| P0 | 人工证据密度自查 | 对照 `templates/朱雀去AI化检查清单.md`「人工为主」节逐项 ✅/❌ |
+| P0 | 人工证据密度自查 | 对照 `templates/朱雀去AI化检查清单.md`「人工为主协议」逐项 ✅/❌ |
 
 **铁律：**
 - 禁止「全文再润一遍」；禁止用检测器分数优化替代内容层动作。
 - 人工注入段写入后，**任何**后续步骤不得整段 AI 重写（修复子代理 context 必须收到此约束）。
 - 分布指纹入带（方差≥90 等）后禁止继续机械拆句。
 - `.done_zhuque` 缺失 = 章节未完成 = 禁止写 N+1。
+- 修复改动超过约 15% 正文时，闭环前必须补跑 4.1e 密度自查。
 
 ### D4 用户回传朱雀结果时的强化协议
 
@@ -115,8 +120,9 @@ commits: ce4e97d..e080f44 # filled at delivery
 → 步骤1 字数确认 → .done_wordcount
 → 步骤2 圣经×5 + 摘要 → .done_bible / .done_summary
 → 步骤3 U 全量审核（或 delegate 探测失败后的降级自审）
-→ 步骤4 结论 + 修复（如需）+ 4.1b 分布 + 4.1c 用词 + 4.1d 六指标 + 4.1e 人工证据包
-→ 对应 .done（含 .done_zhuque）+ .done_merge
+→ 步骤4 结论 → 先 4.1b 分布 + 4.1c 用词 + 4.1d 六指标 + 4.1e 人工证据包 → .done_zhuque
+→ 有 FAIL/建议：修复子代理（禁重写人工段）→ 二次复核；改动大则补跑 4.1e
+→ 对应 U .done + .done_merge
 → 步骤5 周期（如触发）→ 步骤6 章节档案
 → 【第NNN章状态】回执
 ```
@@ -140,17 +146,17 @@ commits: ce4e97d..e080f44 # filled at delivery
 - 不齐 → **自动补缺**，补完再写；禁止带病开写。
 
 **命令表一致性：**
-- 00 协议「写后命令」「写后流水线」两处定义必须都包含：字数 → 圣经/摘要 → U → 修复 → **朱雀 4.1b–4.1e（含人工证据包）** → .done。
+- 00 协议「写后命令」「写后流水线」两处定义必须都包含：字数 → 圣经/摘要 → U → **朱雀 4.1b–4.1e（含人工证据包）→ .done_zhuque** → 修复（如有）→ .done。
 
 ### D6 文件级改动契约
 
 | 文件 | 改动 |
 |------|------|
-| `SKILL.md` | 版本升至 9.6.0；章节完成硬定义强化为「人工为主」口径 + 漏步自愈一句收拢 |
-| `modules/00_强制执行协议.md` | 写后命令/流水线定义补朱雀；前置闸门；漏步自愈矩阵；快捷命令与兜底对齐 D5 |
+| `SKILL.md` | 版本升至 9.6.0；章节完成硬定义强化为「人工为主」口径 + 漏步自愈一句收拢；frontmatter description/tags 补触发词 |
+| `modules/00_强制执行协议.md` | 写后命令/流水线定义补朱雀；**强制序与 03_26 对齐（先朱雀后修复）**；前置闸门；漏步自愈矩阵；快捷命令与兜底对齐 D5 |
 | `modules/03_06_功能模块.md` | 写作要求加入 D2 人工种子硬配额；步骤5 移交改为「不得跳过 03_26」硬门禁；行号引用改为节名引用 |
-| `modules/03_26_功能模块.md` | 4.1e 升级为 D3 人工证据包；修复子代理 context 增加「禁止重写人工段」；`.done_zhuque` 闭环条件写死；补缺规格覆盖 zhuque |
-| `system_prompt.md` | 流水线步骤含朱雀；快速验证清单与禁止行为覆盖漏步模式 |
+| `modules/03_26_功能模块.md` | 4.1e 升级为 D3 人工证据包；修复子代理 context 增加「禁止重写人工段」；`.done_zhuque` 闭环条件写死；补缺规格覆盖 zhuque；修复大幅改动后强制补跑 4.1e |
+| `system_prompt.md` | 流水线步骤含朱雀且顺序对齐；快速验证清单与禁止行为覆盖漏步模式 |
 | `references/朱雀AIGC检测对策.md` | 第十一节改为「人工为主」验收与强化轮 |
 | `templates/朱雀去AI化检查清单.md` | 「疑似AI突围协议」改为「人工为主协议」+ 硬配额与强化轮 |
 | `references/高级写作技巧-整合版.md` | 第十四节补充写前人工种子（与 03_06 对齐），避免与「AI 上限=疑似」表述冲突时仍无操作路径 |
@@ -179,3 +185,4 @@ commits: ce4e97d..e080f44 # filled at delivery
 - [x] T6: 更新朱雀对策第十一节 + 检查清单人工为主协议 — acceptance: 验收目标为人工>疑似；含强化轮与禁令（covers: D1 D3 D4）
 - [x] T7: 更新高级写作技巧第十四节 + README 版本徽章与摘要 — acceptance: 与 03_06/4.1e 无矛盾；README badge=9.6.0（covers: D2 D7）
 - [x] T8: 运行 audit.ps1 与一致性自查 — acceptance: 死引用/版本/残留路径通过；关键术语「人工为主」「.done_zhuque」「漏步」在权威文件交叉可见（covers: D5 D7；depends: T1–T7）
+- [x] T9: 审阅后一致性补丁 — acceptance: 00/system_prompt/README/SKILL 与 03_26「先朱雀后修复」一致；frontmatter 含疑似AI/去AI化/朱雀；修复>15% 正文须补跑 4.1e

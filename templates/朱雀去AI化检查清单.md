@@ -109,7 +109,7 @@
 > - 逐项检查（二）→ 修复子代理/主代理改写时的参考依据
 > - 验证阶段（四）→ 03_26 步骤4.3 修复后二次审核
 > - 对策详情见 `references/朱雀AIGC检测对策.md` 第十一节
-> - **`.done` 客观核验**：`scripts/check-done.ps1` / `scripts/check-done.py`（只认空标记）
+> - **`.done` 客观核验**：`scripts/check-done.ps1` / `scripts/check-done.py`（空标记 + 报告「人工证据包」软校验）
 
 ---
 

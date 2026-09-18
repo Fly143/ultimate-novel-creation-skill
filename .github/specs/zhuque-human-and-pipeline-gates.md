@@ -3,7 +3,7 @@ feature: zhuque-human-and-pipeline-gates
 status: delivered
 updated: 2026-09-18
 branch: fix/zhuque-human-and-pipeline-gates
-commits: ce4e97d..HEAD # delivery + review consistency fixes
+commits: 86607cb..HEAD # v9.6.0 delivery + order patch 9add9a0 + review-fix hardening
 ---
 
 # 朱雀人工为主 + 写后流水线硬门禁
@@ -13,13 +13,15 @@ commits: ce4e97d..HEAD # delivery + review consistency fixes
 **What was built** — 基于 origin/main（ce4e97d）覆盖本地 skill 后，在分支 `fix/zhuque-human-and-pipeline-gates` 上落地 v9.6.0：  
 1）**朱雀「人工为主」**：写前 03_06 人工特征种子硬配额（感官/无用细节/结构不完美/低概率表达/对话毛刺）；写后 03_26 4.1e 人工证据包（人工段≥2段/约≥300字 + 高疑似段重生 + 结构破坏 + 对话毛刺），验收目标为三态中「人工创作特征」**严格大于**「疑似AI」；疑似≥人工时强制强化轮并禁止宣称检测通过；修复子代理禁止整段重写人工注入段。  
 2）**写后流水线硬门禁**：00/SKILL/03_26 对齐章节完成定义（`.done_zhuque` 闭环必需）；漏步自愈矩阵覆盖只交正文/跳U/跳朱雀/跳记忆/缺回执/未闭环写N+1/delegate失败/半程收尾等；「继续/下一章」前置闸门先查上一章 `.done`；03_26 §4.2/§4.3 操作路径强制「先 4.1b–4.1e → zhuque.done → 才 chapter」；结束必须输出【第NNN章状态】回执。  
-3）**一致性补丁（审阅后）**：统一写后顺序为「U → 先朱雀 4.1b–4.1e → `.done_zhuque` → 再修复」；SKILL frontmatter 补触发词；修复大幅改动后强制补跑 4.1e 自查。
+3）**一致性补丁（审阅后）**：统一写后顺序为「U → 先朱雀 4.1b–4.1e → `.done_zhuque` → 再修复」；SKILL frontmatter 补触发词；修复大幅改动后强制补跑 4.1e 自查。  
+4）**二轮审阅修复（本补丁）**：新增 `scripts/check-done.ps1` + `scripts/check-done.py` 客观 `.done` 核验；权威文件显式 `.done_zhuque ≠ 朱雀达标`；`audit.ps1` 增加写后顺序/zhuque 锚点 lint（`-LintOrder` 默认开）；00 双表登记收敛；检查清单 AI率表降为参考分档；规格 `commits` 更正为 `86607cb..HEAD`。
 
 **Verification** —  
-- `powershell -File .github/scripts/audit.ps1 -Root <repo>` → PASS（死引用0 / 孤儿0 / 版本9.6.0 / 无残留英文路径）  
+- `powershell -File .github/scripts/audit.ps1 -Root <repo> -StrictOrphan -LintTerm -LintLineRef` → PASS（死引用0 / 孤儿0 / 版本9.6.0 / 无残留英文路径 / 写后顺序一致；`-LintOrder` 默认开启）  
 - 一致性抽查：SKILL/00/03_06/03_26/system_prompt/清单/朱雀对策/高级写作技巧/README 均含「人工为主」与 zhuque 门禁；**写后顺序以 03_26 为准，00/system_prompt/README/SKILL 已对齐「先朱雀后修复」**；03_26 §4.2/§4.3 含「先执行4.1b–4.1e」「禁止只标U七项就写chapter」  
 - 独立审查第一轮：AC1/3/4/5 MET，AC2 因 §4.2/§4.3 漏 zhuque 判 PARTIAL → 已修复关键项并补残余 one-liner → 复审确认  
 - 第二轮人工审阅：发现 00/system_prompt/README 与 03_26 步骤4 顺序互斥、frontmatter 缺触发词 → 已在本分支修复
+- 第三轮审阅修复：硬门禁工具化 / 语义边界 / 顺序 lint / 命令表去重 / 指标表降参考 / 规格 commits 更正 → 已落地
 
 **Journey log** —  
 1. 本地未提交的朱雀优化在 `git reset --hard origin/main` 后被丢弃；远程 origin/main **没有** 4.1e，需从零写入而非增量改。  
@@ -28,7 +30,8 @@ commits: ce4e97d..HEAD # delivery + review consistency fixes
 4. 第一轮审查暴露「定义层已加 zhuque、操作层 §4.2 仍可绕过」——仅改清单不够，必须改快乐路径步骤顺序。  
 5. 宿主无 `pwsh` 时用 `powershell.exe` 跑 audit.ps1。
 6. 开发规格放在 skill 运行时目录会污染加载面，并触发 StrictOrphan；最终放入 `.github/specs` 维护者目录。  
-7. 第二轮审阅暴露「00 写强制序=修复→朱雀，03_26=先朱雀→修复」——以 03_26 为唯一顺序权威并回写其余文件。
+7. 第二轮审阅暴露「00 写强制序=修复→朱雀，03_26=先朱雀→修复」——以 03_26 为唯一顺序权威并回写其余文件。  
+8. 第三轮审阅：提示词门禁可被空标记绕过、纯 AI 上限与「人工>疑似」易混淆、多文件顺序可能再漂、双表登记易分叉——用 check-done 脚本 + audit 顺序 lint + 语义边界文案 + 命令表收敛一并处理。
 
 ## [S1] Problem
 
@@ -186,3 +189,4 @@ commits: ce4e97d..HEAD # delivery + review consistency fixes
 - [x] T7: 更新高级写作技巧第十四节 + README 版本徽章与摘要 — acceptance: 与 03_06/4.1e 无矛盾；README badge=9.6.0（covers: D2 D7）
 - [x] T8: 运行 audit.ps1 与一致性自查 — acceptance: 死引用/版本/残留路径通过；关键术语「人工为主」「.done_zhuque」「漏步」在权威文件交叉可见（covers: D5 D7；depends: T1–T7）
 - [x] T9: 审阅后一致性补丁 — acceptance: 00/system_prompt/README/SKILL 与 03_26「先朱雀后修复」一致；frontmatter 含疑似AI/去AI化/朱雀；修复>15% 正文须补跑 4.1e
+- [x] T10: 二轮审阅修复 — acceptance: check-done 脚本存在且文档引用；权威文件含语义边界；audit -LintOrder 通过；00 双表登记收敛；检查清单百分比表标注为参考；规格 commits=86607cb..HEAD

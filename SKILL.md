@@ -62,6 +62,6 @@ version: 9.6.0
 - **流水线闭环** = 必需 `.done` 齐（含 `zhuque`）+ 状态回执——脚本可验。
 - **朱雀检测达标** = 用户回传三态「人工 > 疑似」——以检测器+用户为准；**`.done_zhuque` 存在 ≠ 检测已通过**。
 - 纯 AI 全自动常停在「疑似」；要稳定过检测通常需真人重写关键句。禁止把闭环说成过关。
-- 客观核验可选 `scripts/check-done.ps1` / `scripts/check-done.py`（软校验报告是否含「人工证据包」节；`-StrictReport`/`--strict-report` 可升硬失败）。
+- 客观核验可选 `scripts/check-done.ps1` / `scripts/check-done.py`（**只认空标记 size=0，非空无效**；软校验报告是否含「人工证据包」节；`-StrictReport`/`--strict-report` 可升硬失败）。
 
 ---

@@ -194,3 +194,4 @@ commits: 86607cb..HEAD # v9.6.0 delivery + order patch 9add9a0 + review-fix hard
 - [x] T9: 审阅后一致性补丁 — acceptance: 00/system_prompt/README/SKILL 与 03_26「先朱雀后修复」一致；frontmatter 含疑似AI/去AI化/朱雀；修复>15% 正文须补跑 4.1e
 - [x] T10: 二轮审阅修复 — acceptance: check-done 脚本存在且文档引用；权威文件含语义边界；audit -LintOrder 通过；00 双表登记收敛；检查清单百分比表标注为参考；规格 commits=86607cb..HEAD
 - [x] T11: 四轮外部审阅全修 — acceptance: check-done.ps1 中文回执且无 buque/xiehou；双脚本报告软校验（StrictReport 可选）；README/SKILL/00/system_prompt 含双验收与全自动上限说明；00 写后顺序唯一权威+命令表索引化；audit -LintOrder 扩双验收/软校验检查；本地 audit PASS + check-done 合成用例 PASS
+- [x] T12: 五轮工程审阅修复 — acceptance: audit.ps1 去空行污染（约53%空白降至正常）；check-done 只认空标记 size=0（非空默认无效，`--allow-non-empty`/`-AllowNonEmpty` 兼容）；缺标记路径也输出报告软校验诊断；新增 `.github/scripts/test-check-done.py` 回归（19 用例）；文档明确空标记契约；本地 audit + test PASS

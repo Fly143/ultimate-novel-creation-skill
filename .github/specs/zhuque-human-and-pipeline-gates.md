@@ -27,6 +27,7 @@ commits: 86607cb..HEAD # v9.6.0 delivery + order/audit/check-done hardening + st
 - 第三轮审阅修复：硬门禁工具化 / 语义边界 / 顺序 lint / 命令表去重 / 指标表降参考 / 规格 commits 更正 → 已落地
 - 第四轮外部审阅「全修」：check-done 回执语言与坏触发词 / 报告软校验 / 双验收文案 / 00 双表索引化 / audit LintOrder 补强 → 本补丁落地；本地 `audit.ps1` + 合成项目跑 `check-done` 验证
 - 第六轮外部工程审阅：结构软校验 + 对外汇报硬约定 + CI 注释修正 → 本地 audit PASS + check-done 回归 PASS（含 weak-section 用例）
+- 第七轮外部审阅：§4.1 表序补齐 + 软校验强证据门槛 + 章号兼容 → 本地 audit PASS + check-done 回归 29/29 PASS（含策略话术拒绝）
 
 **Journey log** —  
 1. 本地未提交的朱雀优化在 `git reset --hard origin/main` 后被丢弃；远程 origin/main **没有** 4.1e，需从零写入而非增量改。  

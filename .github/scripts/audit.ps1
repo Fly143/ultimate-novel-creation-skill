@@ -1,29 +1,33 @@
 ﻿# ============================================================
+
 # 全能小说作家 - CI 完整性审计脚本（GitHub Actions 调用）
 # 检查：①死引用 ②孤儿文件 ③版本号一致性(SKILL vs README徽章) ④残留英文路径token
-#      ⑤裸英文术语(警告) ⑥裸行号引用(警告)
-# 用法：pwsh .github/scripts/audit.ps1 -Root <仓库路径> [-StrictOrphan] [-LintTerm] [-LintLineRef]
+#      ⑤裸英文术语(警告) ⑥裸行号引用(警告) ⑦写后顺序与 zhuque 门禁一致性
+# 用法：pwsh .github/scripts/audit.ps1 -Root <仓库路径> [-StrictOrphan] [-LintTerm] [-LintLineRef] [-LintOrder]
 #   -StrictOrphan : 孤儿判定收紧为「必须存在指向该资产路径的引用」（默认关闭，便于渐进收紧）
 #   -LintTerm     : 额外检查裸英文术语 volume/phase/stage/summary（仅警告，不阻断）
 #   -LintLineRef  : 额外检查「第N行」式行号引用（仅警告，不阻断）
+#   -LintOrder    : 额外检查写后顺序权威（先朱雀后修复）与 .done_zhuque 语义锚点（默认开启可单独关：-LintOrder:$false）
 # 发现问题输出清单并 exit 1（CI 失败）；全部通过 exit 0。
+
 # ============================================================
+
 param(
     [string]$Root = (Get-Location).Path,
     [switch]$StrictOrphan,
     [switch]$LintTerm,
-    [switch]$LintLineRef
+    [switch]$LintLineRef,
+    [bool]$LintOrder = $true
 )
-
 $enc = New-Object System.Text.UTF8Encoding($false)
 $errors = @()
 $warns = @()
-
 # 归一化 Root 为绝对路径：后续用 $Root.Length 做 Substring 截取相对路径，
 # 传相对路径（如 -Root .）会导致路径错位、全部检查失效。
 $Root = (Resolve-Path -LiteralPath $Root).Path.TrimEnd('\','/')
 
 # ---------- ① 死引用审计 ----------
+
 $files = Get-ChildItem -Recurse -File $Root -Filter *.md | ForEach-Object { $_.FullName.Substring($Root.Length+1) -replace '\\','/' }
 $fileSet = @{}; foreach($f in $files){ $fileSet[$f] = $true }
 $dirSet = @{}
@@ -32,7 +36,6 @@ $dirRe = '(?:modules|references|templates|memory-system|记忆系统模板|模�
 $q = [char]34 + [char]39
 $cls = '[^\s`，。；:：)\]】》' + $q + ']+'
 $broken = @{}
-
 function Test-Cand([string]$cand, [string]$srcDir, [string]$label, [string]$line, [int]$matchIdx) {
   $c = $cand.Trim()
   if($c -eq ''){ return }
@@ -63,7 +66,6 @@ function Test-Cand([string]$cand, [string]$srcDir, [string]$label, [string]$line
   }
   $broken["$srcDir|$label|$c"] = $true
 }
-
 Get-ChildItem -Recurse -File $Root -Filter *.md | ForEach-Object {
   $rel = $_.FullName.Substring($Root.Length+1) -replace '\\','/'
   $parts = $rel -split '/'
@@ -79,7 +81,6 @@ Get-ChildItem -Recurse -File $Root -Filter *.md | ForEach-Object {
     [regex]::Matches($line, $bareRe) | ForEach-Object { Test-Cand $_.Value $srcDir "BARE $rel :$ln" $line $_.Index }
   }
 }
-
 $genuine = @($broken.Keys | Where-Object { $_ -notmatch '记忆系统|设定/|正文/|导出/|拆解/|细纲/|报告/|\.done|项目|进度看板|创作状态追踪|商业可行性|创新深度|章节规划表|立项定位|文风设定|故事圣经|人物弧线|剧情时间线|伏笔清单|角色数据库|金手指约束|时间约束|叙事线|约束|阶段|卷|摘要|圣经|SMOKE_TEST|我的修仙小说|memory-system/|拆解报告|情节节点|情绪模块|人物模块|素材引用说明|文风' } | Where-Object { $_ -notmatch '\|\.md$' })
 if($genuine.Count){
   $errors += "死引用审计发现 $($genuine.Count) 处疑似问题："
@@ -87,12 +88,12 @@ if($genuine.Count){
 }
 
 # ---------- ② 孤儿文件 ----------
+
 $allText = @{}
 Get-ChildItem -Recurse -File $Root -Filter *.md | ForEach-Object {
   $rel = $_.FullName.Substring($Root.Length+1) -replace '\\','/'
   $allText[$rel] = [System.IO.File]::ReadAllText($_.FullName, $enc)
 }
-
 if($StrictOrphan){
   # 收紧版：必须存在「带目录前缀、指向该资产路径」的引用。
   # 旧版用「裸文件名是否出现在任意文档」判定，会被与项目侧产物同名的裸名（如 进度看板.md、
@@ -141,6 +142,7 @@ if($StrictOrphan){
 }
 
 # ---------- ③ 版本号一致性 ----------
+
 $skillVer = ''
 $skillContent = [System.IO.File]::ReadAllText((Join-Path $Root 'SKILL.md'), $enc)
 if($skillContent -match 'version:\s*([0-9]+\.[0-9]+\.[0-9]+)'){ $skillVer = $Matches[1] }
@@ -151,6 +153,7 @@ if($skillVer -eq '' -or $readmeVer -eq ''){ $errors += "版本号解析失败：
 elseif($skillVer -ne $readmeVer){ $errors += "版本号不一致：SKILL.md=$skillVer vs README徽章=$readmeVer" }
 
 # ---------- ④ 残留英文路径 token（项目侧）----------
+
 $forbidden = @('记忆系统/bible','记忆系统/summaries','记忆系统/phases','记忆系统/volumes','记忆系统/constraints','记忆系统/bible/')
 $tokens = @()
 Get-ChildItem -Recurse -File $Root -Filter *.md | ForEach-Object {
@@ -165,6 +168,7 @@ Get-ChildItem -Recurse -File $Root -Filter *.md | ForEach-Object {
 if($tokens.Count){ $errors += "残留英文记忆系统路径 $($tokens.Count) 处：" ; $tokens | Select-Object -Unique | ForEach-Object { $errors += "  $_" } }
 
 # ---------- ⑤ 裸英文术语（警告，不阻断）----------
+
 if($LintTerm){
   # v9.4.0 已声称记忆系统路径中文化，但散文里的英文术语漏改过（volume/phase/stage/summaries）。
   # 排除：代码围栏内内容、.done 标记名（受文件系统约束不可改，且已不在检查词表内）
@@ -190,6 +194,7 @@ if($LintTerm){
 }
 
 # ---------- ⑥ 裸行号引用（警告，不阻断）----------
+
 if($LintLineRef){
   # 用「第 N 行」定位文档内容极易因增删行而失准（CI 无法发现）。改用节名/标题引用。
   $lineHits = @()
@@ -214,7 +219,92 @@ if($LintLineRef){
   }
 }
 
+# ---------- ⑦ 写后顺序与 zhuque 门禁一致性（防多文件再次漂移）----------
+
+# 顺序权威 = modules/03_26_功能模块.md 步骤4（先朱雀 4.1b–4.1e → .done_zhuque → 再修复）。
+# 其余权威文件必须至少含一条「先朱雀」正向锚点，且不得把「先修复再朱雀」写成必做顺序。
+if($LintOrder){
+  $orderFiles = @(
+    @{ Path='modules/03_26_功能模块.md'; AnyOf=@('先执行 4.1b','均先做 4.1b','先 4.1b–4.1e','先做 4.1b','先跑 4.1b','先执行 4.1b–4.1e') },
+    @{ Path='modules/00_强制执行协议.md'; AnyOf=@('先跑朱雀','先朱雀','顺序唯一权威') },
+    @{ Path='SKILL.md'; AnyOf=@('先跑朱雀','先 4.1b','先跑朱雀 4.1b–4.1e') },
+    @{ Path='system_prompt.md'; AnyOf=@('先朱雀','先执行朱雀','先朱雀 4.1b–4.1e') },
+    @{ Path='README.md'; AnyOf=@('先跑 4.1b','先写 zhuque','先朱雀','先 4.1b') }
+  )
+  foreach($spec in $orderFiles){
+    $fp = Join-Path $Root $spec.Path
+    if(-not (Test-Path -LiteralPath $fp)){
+      $errors += "顺序一致性：缺失权威文件 $($spec.Path)"
+      continue
+    }
+    $text = [System.IO.File]::ReadAllText($fp, $enc)
+    $hit = $false
+    foreach($a in $spec.AnyOf){ if($text.Contains($a)){ $hit = $true; break } }
+    if(-not $hit){
+      $errors += "顺序一致性：$($spec.Path) 缺少「先朱雀/先 4.1b」正向锚点（任一：$($spec.AnyOf -join ' / ')）"
+    }
+    if($text -notmatch 'done_zhuque'){
+      $errors += "顺序一致性：$($spec.Path) 未出现 done_zhuque（闭环门禁锚点缺失）"
+    }
+  }
+  # 禁止把错误顺序写成必做（「禁止/不得」语境豁免）
+  $wrongOrderRe = '(先修复再朱雀|修复\s*→\s*朱雀|修复\s*→\s*\.done_zhuque|修复后再(跑)?朱雀|修复，再(跑)?朱雀)'
+  $allowRe = '(禁止|不得|禁写|错误顺序|互斥|勿写|不要写|不要|禁止写成|不得写成)'
+  $orderHits = @()
+  Get-ChildItem -Recurse -File $Root -Filter *.md | ForEach-Object {
+    $rel = $_.FullName.Substring($Root.Length+1) -replace '\\','/'
+    if($rel -like '.github/*'){ return }
+    $lines = [System.IO.File]::ReadAllLines($_.FullName, $enc)
+    $inFence = $false
+    for($i=0;$i -lt $lines.Count;$i++){
+      $ln = $lines[$i]
+      if($ln -match '^\s*(```|~~~)'){ $inFence = -not $inFence; continue }
+      if($inFence){ continue }
+      if($ln -match $wrongOrderRe -and $ln -notmatch $allowRe){
+        $orderHits += "$rel :$($i+1) 疑似写成「先修复后朱雀」必做顺序"
+      }
+    }
+  }
+  if($orderHits.Count){
+    $errors += "顺序一致性：发现 $($orderHits.Count) 处错误写后顺序表述："
+    $orderHits | Select-Object -Unique | ForEach-Object { $errors += "  $_" }
+  }
+  # 语义边界 / 双验收：权威文件应区分「流水线闭环(.done)」与「朱雀检测达标(用户三态)」
+  $semanticFiles = @('README.md','modules/00_强制执行协议.md','modules/03_26_功能模块.md','SKILL.md','system_prompt.md')
+  foreach($sf in $semanticFiles){
+    $fp = Join-Path $Root $sf
+    if(-not (Test-Path -LiteralPath $fp)){ continue }
+    $text = [System.IO.File]::ReadAllText($fp, $enc)
+    if($text -notmatch '(语义边界|双验收|≠\s*朱雀|不等于.*人工|≠\s*检测|存在 ≠ 检测|≠ 检测已通过)'){
+      $warns += "顺序一致性（警告）：$sf 建议显式写明流水线闭环 ≠ 朱雀检测达标（语义边界/双验收）"
+    }
+    if($sf -ne 'modules/03_26_功能模块.md' -and $text -notmatch '(人工介入|真人|全自动|纯 AI|纯AI).{0,60}(疑似|人工|达标|介入|不保证)|全自动.{0,30}不保证'){
+      $warns += "顺序一致性（警告）：$sf 建议说明纯 AI 全自动下「人工>疑似」不一定可达（需真人介入）"
+    }
+  }
+  # 可选工具脚本存在性 + 报告软校验能力文档提及
+  $checkPs1 = Join-Path $Root 'scripts/check-done.ps1'
+  $checkPy  = Join-Path $Root 'scripts/check-done.py'
+  $docBlob = ''
+  foreach($p in @('README.md','modules/00_强制执行协议.md','modules/03_26_功能模块.md','SKILL.md')){
+    $fp = Join-Path $Root $p
+    if(Test-Path -LiteralPath $fp){ $docBlob += [System.IO.File]::ReadAllText($fp, $enc) }
+  }
+  if($docBlob -match 'check-done\.ps1' -and -not (Test-Path -LiteralPath $checkPs1)){
+    $errors += "顺序一致性：文档引用了 scripts/check-done.ps1 但文件不存在"
+  }
+  if($docBlob -match 'check-done\.py' -and -not (Test-Path -LiteralPath $checkPy)){
+    $errors += "顺序一致性：文档引用了 scripts/check-done.py 但文件不存在"
+  }
+  if((Test-Path -LiteralPath $checkPs1) -or (Test-Path -LiteralPath $checkPy)){
+    if($docBlob -notmatch '人工证据包' -or $docBlob -notmatch '(软校验|StrictReport|strict-report)'){
+      $warns += "顺序一致性（警告）：check-done 已存在，建议 README/00/SKILL 至少一处说明「人工证据包」报告软校验（StrictReport）"
+    }
+  }
+}
+
 # ---------- 汇总 ----------
+
 $warnGroups = 0
 if($warns.Count){ $warnGroups = @($warns | Where-Object { $_ -notmatch '^\s\s' }).Count }
 if($errors.Count){
@@ -224,7 +314,8 @@ if($errors.Count){
   exit 1
 } else {
   $orphanNote = if($StrictOrphan){ "孤儿 0（收紧判定）" } else { "孤儿 0（兼容判定）" }
-  Write-Output "✅ 审计全部通过：死引用 0 / $orphanNote / 版本一致($skillVer) / 无残留英文路径"
+  $orderNote = if($LintOrder){ " / 写后顺序一致" } else { "" }
+  Write-Output "✅ 审计全部通过：死引用 0 / $orphanNote / 版本一致($skillVer) / 无残留英文路径$orderNote"
   if($warns.Count){ Write-Output ""; Write-Output "⚠️ 警告 $warnGroups 组（不阻断）："; $warns | ForEach-Object { Write-Output $_ } }
   exit 0
 }

@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   audit:
-    name: 引用/孤儿/版本/路径审计（收紧孤儿判定 + 术语/行号警告）
+    name: 引用/孤儿/版本/路径/写后顺序审计
     runs-on: windows-latest
     steps:
       - name: 检出代码
@@ -21,5 +21,15 @@ jobs:
         run: |
           # -StrictOrphan: 孤儿判定要求「存在指向该资产路径的引用」（堵住裸名与项目侧同名的漏报）
           # -LintTerm / -LintLineRef: 裸英文术语与裸行号引用，仅警告不阻断
+          # -LintOrder 为 [bool] 参数且默认 $true（写后顺序/zhuque 锚点）；如需关闭：-LintOrder:$false
           pwsh .github/scripts/audit.ps1 -Root . -StrictOrphan -LintTerm -LintLineRef
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: check-done 回归测试
+        shell: pwsh
+        env:
+          PYTHONIOENCODING: utf-8
+          PYTHONUTF8: "1"
+        run: |
+          python .github/scripts/test-check-done.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

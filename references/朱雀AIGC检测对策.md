@@ -313,7 +313,7 @@ AI 句长均匀（15-25字），像节拍器；人类长短交错，有呼吸感
 - 每章写后除 4.1b/c/d 外，必须做 **4.1e 人工证据包**（见 `modules/03_26_功能模块.md`）。  
 - 完成后写 `[书名]/.done/第NNN章_zhuque.done`；**缺此标记 = 章节未完成**。  
 - **有此标记 ≠ 检测已通过**：`.done_zhuque` 只登记流水线动作；「人工>疑似」以用户回传三态为准。  
-- 可选客观核验：`scripts/check-done.ps1` / `scripts/check-done.py`（必需 `.done` 空标记 + 报告「人工证据包」节**结构软校验**：标题 + 证据锚点 ≥2 类；`-StrictReport`/`--strict-report` 可升硬失败）。  
+- 可选客观核验：`scripts/check-done.ps1` / `scripts/check-done.py`（必需 `.done` 空标记 + 报告「人工证据包」节**结构软校验**：标题 + 证据锚点 ≥2 类且至少含一类强证据——人工段/段落位置/300字 等；策略话术单独出现不算；`-StrictReport`/`--strict-report` 可升硬失败）。  
 - 对外汇报必须分列：流水线闭环（`.done`/check-done）≠ 检测达标（用户回传三态）。  
 - 操作清单与用户回执格式见 `templates/朱雀去AI化检查清单.md`「人工为主协议」。  
 

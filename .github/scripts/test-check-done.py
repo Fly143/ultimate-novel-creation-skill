@@ -63,7 +63,7 @@ BASE = [
     "merge",
 ]
 
-# 结构软校验合格样例：标题 + ≥2 类证据锚点
+# 结构软校验合格样例：标题 + ≥2 类锚点 + 强证据（人工段/段落位置/300字）
 GOOD_REPORT = (
     "# 审核报告\n"
     "## 人工证据包\n"
@@ -75,6 +75,22 @@ GOOD_REPORT = (
 
 # 仅有标题/一笔带过 → weak-section
 WEAK_REPORT = "# 审核\n## 人工证据包\n已注入\n"
+
+# 策略话术（抄协议原文，无强证据）→ strict 必须拒绝
+POLICY_COPY_REPORT = (
+    "# 审核\n"
+    "## 人工证据包\n"
+    "按人工为主协议完成密度自查，目标人工为主。\n"
+    "高疑似段：无。\n"
+)
+
+# 只有弱锚点、无强证据 → strict 必须拒绝
+NO_STRONG_REPORT = (
+    "# 审核报告\n"
+    "## 人工证据包\n"
+    "- 结构破坏：中段跳时间\n"
+    "- 对话毛刺：口癖2处\n"
+)
 
 
 def case(name: str, ok: bool, cond: bool, detail: str = "") -> bool:
@@ -136,6 +152,17 @@ def main() -> int:
             case("输出含 weak-section/结构证据", True, "结构证据" in out or "weak-section" in out)
         )
 
+        # 6c) 策略话术抄协议 + strict → exit1（不得仅凭「人工为主/密度自查」通过）
+        write_report(p4, 1, POLICY_COPY_REPORT)
+        code, out = run(p4, 1, "--strict-report")
+        results.append(case("strict 策略话术假闭环 → exit1", True, code == 1, out[:400]))
+        results.append(case("输出含强证据要求", True, "强证据" in out))
+
+        # 6d) 仅弱锚点无强证据 + strict → exit1
+        write_report(p4, 1, NO_STRONG_REPORT)
+        code, out = run(p4, 1, "--strict-report")
+        results.append(case("strict 无强证据 → exit1", True, code == 1, out[:400]))
+
         # 7) 报告结构合格 + strict → exit0
         write_report(p4, 1, GOOD_REPORT)
         code, out = run(p4, 1, "--strict-report")
@@ -172,14 +199,13 @@ def main() -> int:
         code, out = run(p6, 10, "--strict-report")
         results.append(case("ch10 空标记齐 → exit0", True, code == 0, out[:400]))
 
-        # 12) 缺标记时 strict-report 仍打印报告诊断
+        # 12) 标记齐但报告缺失 + strict：exit1 且打印软校验（非「缺标记」场景）
         p7 = tmp_path / "p7"
-        empty_done(p7, 1, [m for m in BASE if m != "zhuque"])
-        empty_done(p7, 1, ["zhuque"])  # add zhuque empty
+        empty_done(p7, 1, BASE)
         code, out = run(p7, 1, "--strict-report")
-        results.append(case("缺标记+strict 仍 exit1", True, code == 1))
+        results.append(case("标记齐无报告+strict → exit1", True, code == 1))
         results.append(
-            case("缺标记时仍打印软校验", True, "软校验" in out or "报告" in out)
+            case("标记齐无报告时仍打印软校验", True, "软校验" in out or "报告" in out)
         )
 
         # 13) 缺标记 + 弱报告 + strict：exit1 且输出 weak 诊断
@@ -192,6 +218,18 @@ def main() -> int:
         results.append(
             case("缺标记路径仍输出结构软校验诊断", True, "结构证据" in out or "软校验" in out)
         )
+
+        # 14) 不填充章号 第1章_* 应被识别
+        p9 = tmp_path / "p9"
+        done9 = p9 / ".done"
+        done9.mkdir(parents=True)
+        for m in BASE:
+            (done9 / f"第1章_{m}.done").write_bytes(b"")
+        rep9 = p9 / "报告"
+        rep9.mkdir()
+        (rep9 / "第1章_全量审核报告.md").write_text(GOOD_REPORT, encoding="utf-8")
+        code, out = run(p9, 1, "--strict-report")
+        results.append(case("不填充章号 第1章 → exit0", True, code == 0, out[:400]))
 
     ok_n = sum(results)
     total = len(results)

@@ -106,7 +106,7 @@ v9.6.0 写后流水线要点：
    - 「继续/下一章」前置闸门：先查上一章 `.done`，不齐先补缺。  
    - 每章结束必须输出【第NNN章状态】回执。  
    - **语义边界**：`.done_zhuque` 只表示 4.1e 步骤已登记，**≠** 朱雀「人工>疑似」已达标；闭环看 `.done`，达标看用户回传三态。  
-   - **客观核验**：可选运行 `scripts/check-done.ps1` 或 `scripts/check-done.py`（按项目目录+章节号核验必需 `.done`；**只认空标记（size=0），非空标记判无效**；另对审核报告做「人工证据包」节**结构软校验**——标题 + 证据锚点 ≥2 类（人工段/段落位置/300字/结构破坏等），可用 `-StrictReport`/`--strict-report` 提升为硬失败；不代替补跑）。维护者回归：`python .github/scripts/test-check-done.py`。**对外汇报必须分列**流水线闭环与朱雀三态/待检测，禁止只贴 `.done` 或 check-done exit0 冒充检测通过。
+   - **客观核验**：可选运行 `scripts/check-done.ps1` 或 `scripts/check-done.py`（按项目目录+章节号核验必需 `.done`，章号兼容 `第NNN章`/`第N章`；**只认空标记（size=0），非空标记判无效**；另对审核报告做「人工证据包」节**结构软校验**——标题 + 证据锚点 ≥2 类**且至少含一类强证据**（人工段/段落位置/300字 等；策略话术单独出现不算），可用 `-StrictReport`/`--strict-report` 提升为硬失败；不代替补跑）。维护者回归：`python .github/scripts/test-check-done.py`。**对外汇报必须分列**流水线闭环与朱雀三态/待检测，禁止只贴 `.done` 或 check-done exit0 冒充检测通过。
 
 3. **双验收口径（必读，防把闭环当成过关）**：
 

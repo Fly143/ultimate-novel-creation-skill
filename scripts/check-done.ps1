@@ -4,7 +4,9 @@
 # 原则：闭环判定只认文件系统**空标记（size=0）**，不读正文、不代替主代理补跑。
 #       非空标记视为无效（疑似伪造/误写内容），计入未闭环。
 # 软校验：标记齐全时，额外 warn 审核报告「人工证据包」节的结构证据
-#         （防「只造标记/只贴标题」；标题 + 证据锚点 ≥2 类才通过；默认不阻断）。
+#         （防「只造标记/只贴标题/抄策略话术」；标题 + 证据锚点 ≥2 类
+#          且至少含一类强证据：人工段/人工注入/段落位置/300字/≥300；默认不阻断）。
+#         策略词（人工为主/密度自查）单独出现不算通过。
 # 注意：`.done_zhuque` 存在 = 4.1b–4.1e 步骤已登记；
 #       不等于朱雀三态已「人工 > 疑似」达标（目标仍以用户回传为准）。
 # 用法：
@@ -13,6 +15,7 @@
 #   powershell -File scripts/check-done.ps1 -Project <书名> -Chapter 12 -StrictReport
 #   powershell -File scripts/check-done.ps1 -Project <书名> -Chapter 12 -AllowNonEmpty
 # 退出码：0=必需空标记齐；1=缺标记/非空标记/路径错误（-StrictReport 时报告软校验失败亦 exit 1）
+# 章号兼容：标记/报告同时接受 第NNN章 与 第N章
 # ============================================================
 param(
     [Parameter(Mandatory = $true)][string]$Project,
@@ -72,13 +75,40 @@ if (($Chapter % 10) -eq 0) {
     $required += 'innovation'
 }
 
+function Test-MarkerByChapter {
+    param([string]$DoneDir, [string]$Nnn, [int]$Ch, [string]$Suffix)
+    $candidates = @(
+        ('第{0}章{1}' -f $Nnn, $Suffix)
+    )
+    $unpadded = ('第{0}章{1}' -f $Ch, $Suffix)
+    if ($candidates -notcontains $unpadded) { $candidates += $unpadded }
+    foreach ($name in $candidates) {
+        $file = Join-Path $DoneDir $name
+        $state = Test-MarkerState -Path $file
+        if ($state -ne 'missing') { return $state }
+    }
+    return 'missing'
+}
+
+function Resolve-ChapterFile {
+    param([string]$BaseDir, [string]$Nnn, [int]$Ch, [string]$Suffix)
+    $candidates = @(
+        ('第{0}章{1}' -f $Nnn, $Suffix)
+    )
+    $unpadded = ('第{0}章{1}' -f $Ch, $Suffix)
+    if ($candidates -notcontains $unpadded) { $candidates += $unpadded }
+    foreach ($name in $candidates) {
+        $file = Join-Path $BaseDir $name
+        if (Test-Path -LiteralPath $file) { return $file }
+    }
+    return $null
+}
+
 $present = @()
 $nonempty = @()
 $missing = @()
 foreach ($mark in $required) {
-    $name = '第{0}章_{1}.done' -f $nnn, $mark
-    $file = Join-Path $doneDir $name
-    $state = Test-MarkerState -Path $file
+    $state = Test-MarkerByChapter -DoneDir $doneDir -Nnn $nnn -Ch $Chapter -Suffix ('_{0}.done' -f $mark)
     if ($state -eq 'present') {
         $present += $mark
     }
@@ -90,23 +120,26 @@ foreach ($mark in $required) {
     }
 }
 
-$chapterFile = Join-Path $doneDir ('第{0}章_chapter.done' -f $nnn)
-$chapterState = Test-MarkerState -Path $chapterFile
+$chapterState = Test-MarkerByChapter -DoneDir $doneDir -Nnn $nnn -Ch $Chapter -Suffix '_chapter.done'
 $hasChapter = ($chapterState -eq 'present') -or ($chapterState -eq 'nonempty' -and $AllowNonEmpty)
 $hasZhuque = $present -contains 'zhuque'
 
-# 报告软校验：有效 zhuque 空标记存在时，看「人工证据包」节是否有结构证据（锚点≥2类）
+# 报告软校验：有效 zhuque 空标记存在时，看「人工证据包」节是否有结构证据（≥2类且含强证据）
 $reportStatus = 'skipped'
 $reportMsgs = @()
 $evidenceMarkers = @(
-    '人工段', '人工注入', '段落位置', '≥300', '300字', '约≥300',
-    '结构破坏', '对话毛刺', '高疑似', '密度自查', '人工为主'
+    '人工段', '人工注入', '段落位置', '≥300', '300字',
+    '结构破坏', '对话毛刺', '高疑似段', '密度自查'
+)
+$strongMarkers = @(
+    '人工段', '人工注入', '段落位置', '≥300', '300字'
 )
 if ($hasZhuque) {
-    $reportPath = Join-Path $ProjectPath ('报告/第{0}章_全量审核报告.md' -f $nnn)
-    if (-not (Test-Path -LiteralPath $reportPath)) {
+    $reportDir = Join-Path $ProjectPath '报告'
+    $reportPath = Resolve-ChapterFile -BaseDir $reportDir -Nnn $nnn -Ch $Chapter -Suffix '_全量审核报告.md'
+    if ($null -eq $reportPath -or -not (Test-Path -LiteralPath $reportPath)) {
         $reportStatus = 'missing'
-        $reportMsgs += ('软校验：存在 .done_zhuque，但未找到审核报告（疑似只造标记未写报告）：{0}' -f $reportPath)
+        $reportMsgs += ('软校验：存在 .done_zhuque，但未找到审核报告（疑似只造标记未写报告）：{0}' -f $reportDir)
     }
     else {
         $reportText = [System.IO.File]::ReadAllText($reportPath, $enc)
@@ -119,10 +152,15 @@ if ($hasZhuque) {
             foreach ($m in $evidenceMarkers) {
                 if ($reportText.Contains($m)) { $hits += $m }
             }
-            if ($hits.Count -lt 2) {
+            $strongHits = @()
+            foreach ($m in $strongMarkers) {
+                if ($reportText.Contains($m)) { $strongHits += $m }
+            }
+            if ($hits.Count -lt 2 -or $strongHits.Count -lt 1) {
                 if ($hits.Count) { $hitTxt = ($hits -join ', ') } else { $hitTxt = '（无）' }
+                if ($strongHits.Count) { $strongTxt = ($strongHits -join ', ') } else { $strongTxt = '（无）' }
                 $reportStatus = 'weak-section'
-                $reportMsgs += ('软校验：报告含「人工证据包」标题但结构证据不足（证据锚点命中 {0}/≥2，需至少两类：人工段/段落位置/300字/结构破坏/对话毛刺/高疑似/密度自查 等）。命中：{1} → {2}' -f $hits.Count, $hitTxt, $reportPath)
+                $reportMsgs += ('软校验：报告含「人工证据包」标题但结构证据不足（证据锚点命中 {0}/≥2 且须含强证据：人工段/人工注入/段落位置/300字/≥300；策略话术如「人工为主」「密度自查」单独出现不算）。锚点命中：{1}；强证据：{2} → {3}' -f $hits.Count, $hitTxt, $strongTxt, $reportPath)
             }
             else {
                 $reportStatus = 'ok'

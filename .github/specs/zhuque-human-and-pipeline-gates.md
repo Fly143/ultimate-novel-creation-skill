@@ -1,9 +1,9 @@
 ---
 feature: zhuque-human-and-pipeline-gates
 status: delivered
-updated: 2026-09-18
+updated: 2026-09-19
 branch: fix/zhuque-human-and-pipeline-gates
-commits: 86607cb..HEAD # v9.6.0 delivery + order patch 9add9a0 + review-fix hardening
+commits: 86607cb..HEAD # v9.6.0 delivery + order/audit/check-done hardening + structural soft-check
 ---
 
 # 朱雀人工为主 + 写后流水线硬门禁
@@ -15,7 +15,8 @@ commits: 86607cb..HEAD # v9.6.0 delivery + order patch 9add9a0 + review-fix hard
 2）**写后流水线硬门禁**：00/SKILL/03_26 对齐章节完成定义（`.done_zhuque` 闭环必需）；漏步自愈矩阵覆盖只交正文/跳U/跳朱雀/跳记忆/缺回执/未闭环写N+1/delegate失败/半程收尾等；「继续/下一章」前置闸门先查上一章 `.done`；03_26 §4.2/§4.3 操作路径强制「先 4.1b–4.1e → zhuque.done → 才 chapter」；结束必须输出【第NNN章状态】回执。  
 3）**一致性补丁（审阅后）**：统一写后顺序为「U → 先朱雀 4.1b–4.1e → `.done_zhuque` → 再修复」；SKILL frontmatter 补触发词；修复大幅改动后强制补跑 4.1e 自查。  
 4）**二轮审阅修复（本补丁）**：新增 `scripts/check-done.ps1` + `scripts/check-done.py` 客观 `.done` 核验；权威文件显式 `.done_zhuque ≠ 朱雀达标`；`audit.ps1` 增加写后顺序/zhuque 锚点 lint（`-LintOrder` 默认开）；00 双表登记收敛；检查清单 AI率表降为参考分档；规格 `commits` 更正为 `86607cb..HEAD`。  
-5）**三轮外部审阅修复（全修补丁）**：`check-done.ps1` 全文中文化并修复坏触发词 `buque/xiehou`→「补缺/写后」；双脚本增加审核报告「人工证据包」节**软校验**（`-StrictReport`/`--strict-report` 可升硬失败）；README/SKILL/system_prompt/00 显式**双验收口径**（流水线闭环 vs 朱雀检测达标；纯 AI 全自动不保证「人工>疑似」）；00 命令表收敛为触发索引、写后顺序唯一权威=「写后流水线」节；`audit.ps1` LintOrder 扩锚点 + 双验收/真人介入文案 warn + 软校验文档提及检查。
+5）**三轮外部审阅修复（全修补丁）**：`check-done.ps1` 全文中文化并修复坏触发词 `buque/xiehou`→「补缺/写后」；双脚本增加审核报告「人工证据包」节**软校验**（`-StrictReport`/`--strict-report` 可升硬失败）；README/SKILL/system_prompt/00 显式**双验收口径**（流水线闭环 vs 朱雀检测达标；纯 AI 全自动不保证「人工>疑似」）；00 命令表收敛为触发索引、写后顺序唯一权威=「写后流水线」节；`audit.ps1` LintOrder 扩锚点 + 双验收/真人介入文案 warn + 软校验文档提及检查。  
+6）**六轮外部工程审阅修复（本补丁）**：check-done 软校验从「子串命中」升级为**结构证据**（标题 + 证据锚点 ≥2 类：人工段/段落位置/300字/结构破坏/对话毛刺/高疑似/密度自查）；双脚本与文档对齐 `weak-section` 状态；状态回执与权威文件写死**对外汇报硬约定**（闭环与三态分列，禁止只贴 `.done`/exit0 冒充检测通过）；`audit.yml` 修正 `-LintOrder:$false` 传参说明；回归用例覆盖弱结构证据路径。
 
 **Verification** —  
 - `powershell -File .github/scripts/audit.ps1 -Root <repo> -StrictOrphan -LintTerm -LintLineRef` → PASS（死引用0 / 孤儿0 / 版本9.6.0 / 无残留英文路径 / 写后顺序一致；`-LintOrder` 默认开启）  
@@ -24,6 +25,7 @@ commits: 86607cb..HEAD # v9.6.0 delivery + order patch 9add9a0 + review-fix hard
 - 第二轮人工审阅：发现 00/system_prompt/README 与 03_26 步骤4 顺序互斥、frontmatter 缺触发词 → 已在本分支修复
 - 第三轮审阅修复：硬门禁工具化 / 语义边界 / 顺序 lint / 命令表去重 / 指标表降参考 / 规格 commits 更正 → 已落地
 - 第四轮外部审阅「全修」：check-done 回执语言与坏触发词 / 报告软校验 / 双验收文案 / 00 双表索引化 / audit LintOrder 补强 → 本补丁落地；本地 `audit.ps1` + 合成项目跑 `check-done` 验证
+- 第六轮外部工程审阅：结构软校验 + 对外汇报硬约定 + CI 注释修正 → 本地 audit PASS + check-done 回归 PASS（含 weak-section 用例）
 
 **Journey log** —  
 1. 本地未提交的朱雀优化在 `git reset --hard origin/main` 后被丢弃；远程 origin/main **没有** 4.1e，需从零写入而非增量改。  
@@ -35,6 +37,7 @@ commits: 86607cb..HEAD # v9.6.0 delivery + order patch 9add9a0 + review-fix hard
 7. 第二轮审阅暴露「00 写强制序=修复→朱雀，03_26=先朱雀→修复」——以 03_26 为唯一顺序权威并回写其余文件。  
 8. 第三轮审阅：提示词门禁可被空标记绕过、纯 AI 上限与「人工>疑似」易混淆、多文件顺序可能再漂、双表登记易分叉——用 check-done 脚本 + audit 顺序 lint + 语义边界文案 + 命令表收敛一并处理。
 9. 第四轮外部审阅指出：ps1 回执混语且 `buque/xiehou` 无法对应触发词；空标记可被造假；「人工>疑似」在全自动下可能不可达却写成硬验收；00 命令表仍可能漂移。处理：脚本中文化 + 报告软校验 + 双验收表 + 命令表索引化 + audit 扩锚点。
+10. 第六轮外部工程审阅指出：软校验只要子串「人工证据包」即可过 strict，仍可被「只贴标题」绕过；对外用 check-done exit0 冒充检测通过的口子仍在。处理：结构锚点≥2类 + 状态回执/权威文件写死对外汇报硬约定。
 
 ## [S1] Problem
 
@@ -195,3 +198,5 @@ commits: 86607cb..HEAD # v9.6.0 delivery + order patch 9add9a0 + review-fix hard
 - [x] T10: 二轮审阅修复 — acceptance: check-done 脚本存在且文档引用；权威文件含语义边界；audit -LintOrder 通过；00 双表登记收敛；检查清单百分比表标注为参考；规格 commits=86607cb..HEAD
 - [x] T11: 四轮外部审阅全修 — acceptance: check-done.ps1 中文回执且无 buque/xiehou；双脚本报告软校验（StrictReport 可选）；README/SKILL/00/system_prompt 含双验收与全自动上限说明；00 写后顺序唯一权威+命令表索引化；audit -LintOrder 扩双验收/软校验检查；本地 audit PASS + check-done 合成用例 PASS
 - [x] T12: 五轮工程审阅修复 — acceptance: audit.ps1 去空行污染（约53%空白降至正常）；check-done 只认空标记 size=0（非空默认无效，`--allow-non-empty`/`-AllowNonEmpty` 兼容）；缺标记路径也输出报告软校验诊断；新增 `.github/scripts/test-check-done.py` 回归（19 用例）；文档明确空标记契约；本地 audit + test PASS
+- [x] T13: 六轮外部工程审阅修复 — acceptance: check-done 软校验=标题+证据锚点≥2类（weak-section）；双脚本同口径；00/SKILL/README/system_prompt/03_26/清单/对策 含结构软校验与对外汇报硬约定；audit.yml 注释改为 `-LintOrder:$false`；回归覆盖弱证据/强证据/对外硬约定；本地 audit + test PASS
+- [x] T13: 六轮外部工程审阅修复 — acceptance: check-done 软校验=标题+证据锚点≥2类（weak-section）；双脚本同口径；00/SKILL/README/system_prompt/03_26/清单/对策 含结构软校验与对外汇报硬约定；audit.yml 注释改为 `-LintOrder:$false`；回归覆盖弱证据/强证据/对外硬约定；本地 audit + test PASS

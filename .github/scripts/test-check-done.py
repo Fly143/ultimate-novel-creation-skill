@@ -63,6 +63,19 @@ BASE = [
     "merge",
 ]
 
+# 结构软校验合格样例：标题 + ≥2 类证据锚点
+GOOD_REPORT = (
+    "# 审核报告\n"
+    "## 人工证据包\n"
+    "- 人工段注入：第3段、第7段，合计约320字\n"
+    "- 段落位置：已写入报告\n"
+    "- 结构破坏：中段跳时间，未解释信息残留\n"
+    "- 对话毛刺：主要角色口癖2处\n"
+)
+
+# 仅有标题/一笔带过 → weak-section
+WEAK_REPORT = "# 审核\n## 人工证据包\n已注入\n"
+
 
 def case(name: str, ok: bool, cond: bool, detail: str = "") -> bool:
     status = "PASS" if cond == ok else "FAIL"
@@ -101,6 +114,9 @@ def main() -> int:
         code, out = run(p4, 1)
         results.append(case("空标记齐无报告 → exit0", True, code == 0, out[:400]))
         results.append(case("软校验 missing 警告", True, "软校验" in out or "报告" in out))
+        results.append(
+            case("成功路径含对外汇报硬约定", True, "对外汇报硬约定" in out or "三态" in out)
+        )
 
         # 5) strict-report + 无报告 → exit1
         code, out = run(p4, 1, "--strict-report")
@@ -112,23 +128,36 @@ def main() -> int:
         results.append(case("strict 缺人工证据包节 → exit1", True, code == 1))
         results.append(case("输出含人工证据包", True, "人工证据包" in out))
 
-        # 7) 报告含「人工证据包」+ strict → exit0
-        write_report(p4, 1, "# 审核\n## 人工证据包\n已注入\n")
+        # 6b) 仅标题无结构证据 + strict → exit1（weak-section）
+        write_report(p4, 1, WEAK_REPORT)
         code, out = run(p4, 1, "--strict-report")
-        results.append(case("strict 报告合格 → exit0", True, code == 0, out[:400]))
+        results.append(case("strict 弱结构证据 → exit1", True, code == 1, out[:400]))
+        results.append(
+            case("输出含 weak-section/结构证据", True, "结构证据" in out or "weak-section" in out)
+        )
+
+        # 7) 报告结构合格 + strict → exit0
+        write_report(p4, 1, GOOD_REPORT)
+        code, out = run(p4, 1, "--strict-report")
+        results.append(case("strict 结构合格报告 → exit0", True, code == 0, out[:400]))
 
         # 8) 非空标记默认拒绝
         p5 = tmp_path / "p5"
         empty_done(p5, 1, BASE)
         (p5 / ".done" / "第001章_merge.done").write_text("FAKE", encoding="utf-8")
-        write_report(p5, 1, "## 人工证据包\n")
+        write_report(p5, 1, GOOD_REPORT)
         code, out = run(p5, 1, "--strict-report")
         results.append(case("非空标记默认 → exit1", True, code == 1))
         results.append(case("输出提示非空", True, "非空" in out))
 
-        # 9) --allow-non-empty 兼容放行
+        # 9) --allow-non-empty 兼容放行（报告需结构合格，否则 strict 仍拦）
         code, out = run(p5, 1, "--strict-report", "--allow-non-empty")
-        results.append(case("allow-non-empty → exit0", True, code == 0, out[:400]))
+        results.append(case("allow-non-empty + 合格报告 → exit0", True, code == 0, out[:400]))
+
+        # 9b) allow-non-empty + 弱报告 + strict → exit1
+        write_report(p5, 1, WEAK_REPORT)
+        code, out = run(p5, 1, "--strict-report", "--allow-non-empty")
+        results.append(case("allow-non-empty + 弱报告 + strict → exit1", True, code == 1, out[:400]))
 
         # 10) 第10章缺 innovation
         p6 = tmp_path / "p6"
@@ -139,20 +168,29 @@ def main() -> int:
 
         # 11) 第10章齐（含空 innovation）+ 合格报告
         empty_done(p6, 10, ["innovation"])
-        write_report(p6, 10, "## 人工证据包\nok\n")
+        write_report(p6, 10, GOOD_REPORT)
         code, out = run(p6, 10, "--strict-report")
         results.append(case("ch10 空标记齐 → exit0", True, code == 0, out[:400]))
 
         # 12) 缺标记时 strict-report 仍打印报告诊断
         p7 = tmp_path / "p7"
         empty_done(p7, 1, [m for m in BASE if m != "zhuque"])
-        # 无 zhuque 时软校验 skipped — 再造一个缺 merge 但有 zhuque 的场景
         empty_done(p7, 1, ["zhuque"])  # add zhuque empty
-        # still missing others; no report
         code, out = run(p7, 1, "--strict-report")
         results.append(case("缺标记+strict 仍 exit1", True, code == 1))
         results.append(
             case("缺标记时仍打印软校验", True, "软校验" in out or "报告" in out)
+        )
+
+        # 13) 缺标记 + 弱报告 + strict：exit1 且输出 weak 诊断
+        p8 = tmp_path / "p8"
+        empty_done(p8, 1, BASE)
+        (p8 / ".done" / "第001章_merge.done").unlink()
+        write_report(p8, 1, WEAK_REPORT)
+        code, out = run(p8, 1, "--strict-report")
+        results.append(case("缺merge+弱报告+strict → exit1", True, code == 1))
+        results.append(
+            case("缺标记路径仍输出结构软校验诊断", True, "结构证据" in out or "软校验" in out)
         )
 
     ok_n = sum(results)

@@ -3,10 +3,14 @@
 
 闭环判定只认 `[书名]/.done/` **空标记**（size=0）；不读正文、不代替补跑。
 非空标记视为无效（疑似伪造/误写内容），计入未闭环。
+标记/报告章号同时接受 `第NNN章`（零填充）与 `第N章`（不填充）。
+
 软校验：标记含 zhuque 时，额外 warn 审核报告「人工证据包」节的**结构证据**
-（防「只造标记/只贴标题」；默认不阻断，`--strict-report` 时失败）。
+（防「只造标记/只贴标题/抄策略话术」；默认不阻断，`--strict-report` 时失败）。
 通过条件：出现「人工证据包」标题，且证据锚点命中 ≥2 类
-（人工段/人工注入/段落位置/300字/结构破坏/对话毛刺/高疑似/密度自查 等）。
+**且至少含一类强证据**（人工段/人工注入/段落位置/300字/≥300）。
+策略词（如「人工为主」「密度自查」）单独出现**不算**通过。
+
 `.done_zhuque` 存在 = 4.1b–4.1e 步骤已登记 ≠ 朱雀「人工>疑似」达标。
 
 用法：
@@ -39,19 +43,24 @@ BASE_MARKS = [
     "merge",
 ]
 
-# 4.1e 报告结构软校验：至少命中 2 类，降低「只写标题」假闭环
+# 4.1e 报告结构软校验：≥2 类锚点，且至少 1 类强证据（防抄策略话术假闭环）
 EVIDENCE_MARKERS = [
     "人工段",
     "人工注入",
     "段落位置",
     "≥300",
     "300字",
-    "约≥300",
     "结构破坏",
     "对话毛刺",
-    "高疑似",
+    "高疑似段",
     "密度自查",
-    "人工为主",
+]
+STRONG_MARKERS = [
+    "人工段",
+    "人工注入",
+    "段落位置",
+    "≥300",
+    "300字",
 ]
 
 
@@ -74,17 +83,45 @@ def classify_marker(path: Path) -> str:
         return "nonempty"
 
 
-def check_report_soft(project: Path, nnn: str, has_zhuque: bool) -> tuple[str, list[str]]:
+def _candidate_names(nnn: str, chapter: int, suffix: str) -> list[str]:
+    """章号文件名：优先零填充 NNN，同时兼容不填充 N。"""
+    names = [f"第{nnn}章{suffix}"]
+    unpadded = f"第{chapter}章{suffix}"
+    if unpadded not in names:
+        names.append(unpadded)
+    return names
+
+
+def resolve_existing(base_dir: Path, nnn: str, chapter: int, suffix: str) -> Path | None:
+    for name in _candidate_names(nnn, chapter, suffix):
+        path = base_dir / name
+        if path.exists():
+            return path
+    return None
+
+
+def classify_first(base_dir: Path, nnn: str, chapter: int, suffix: str) -> str:
+    found = resolve_existing(base_dir, nnn, chapter, suffix)
+    if found is None:
+        return "missing"
+    return classify_marker(found)
+
+
+def check_report_soft(project: Path, nnn: str, chapter: int, has_zhuque: bool) -> tuple[str, list[str]]:
     """返回 (状态, 错误/警告消息列表)。
 
     状态：skipped / missing / no-section / weak-section / ok
     """
     if not has_zhuque:
         return "skipped", []
-    report_path = project / "报告" / f"第{nnn}章_全量审核报告.md"
-    if not report_path.is_file():
+    report_dir = project / "报告"
+    report_path = resolve_existing(report_dir, nnn, chapter, "_全量审核报告.md")
+    if report_path is None or not report_path.is_file():
+        expected = " / ".join(
+            str(report_dir / n) for n in _candidate_names(nnn, chapter, "_全量审核报告.md")
+        )
         return "missing", [
-            f"软校验：存在 .done_zhuque，但未找到审核报告（疑似只造标记未写报告）：{report_path}"
+            f"软校验：存在 .done_zhuque，但未找到审核报告（疑似只造标记未写报告）：{expected}"
         ]
     text = report_path.read_text(encoding="utf-8", errors="replace")
     if "人工证据包" not in text:
@@ -92,12 +129,15 @@ def check_report_soft(project: Path, nnn: str, has_zhuque: bool) -> tuple[str, l
             f"软校验：审核报告未出现「人工证据包」节标题（4.1e 可能未真正执行）：{report_path}"
         ]
     hits = [k for k in EVIDENCE_MARKERS if k in text]
-    if len(hits) < 2:
+    strong_hits = [k for k in STRONG_MARKERS if k in text]
+    if len(hits) < 2 or not strong_hits:
         hit_txt = ", ".join(hits) if hits else "（无）"
+        strong_txt = ", ".join(strong_hits) if strong_hits else "（无）"
         return "weak-section", [
             "软校验：报告含「人工证据包」标题但结构证据不足"
-            f"（证据锚点命中 {len(hits)}/≥2，需至少两类：人工段/段落位置/300字/结构破坏/对话毛刺/高疑似/密度自查 等）"
-            f"。命中：{hit_txt} → {report_path}"
+            f"（证据锚点命中 {len(hits)}/≥2 且须含强证据：人工段/人工注入/段落位置/300字/≥300；"
+            "策略话术如「人工为主」「密度自查」单独出现不算）"
+            f"。锚点命中：{hit_txt}；强证据：{strong_txt} → {report_path}"
         ]
     return "ok", []
 
@@ -146,8 +186,7 @@ def main() -> int:
     nonempty: list[str] = []
     missing: list[str] = []
     for mark in required:
-        path = done_dir / f"第{nnn}章_{mark}.done"
-        state = classify_marker(path)
+        state = classify_first(done_dir, nnn, chapter, f"_{mark}.done")
         if state == "present":
             present.append(mark)
         elif state == "nonempty":
@@ -158,14 +197,13 @@ def main() -> int:
         else:
             missing.append(mark)
 
-    chapter_file = done_dir / f"第{nnn}章_chapter.done"
-    chapter_state = classify_marker(chapter_file)
+    chapter_state = classify_first(done_dir, nnn, chapter, "_chapter.done")
     has_chapter = chapter_state == "present" or (
         chapter_state == "nonempty" and args.allow_non_empty
     )
     has_zhuque = "zhuque" in present
 
-    report_status, report_msgs = check_report_soft(project, nnn, has_zhuque)
+    report_status, report_msgs = check_report_soft(project, nnn, chapter, has_zhuque)
 
     print(f"【check-done】项目={project} 章节=第{nnn} 章")
     print(f"必需标记数：{len(required)}（10 倍数章含 innovation；只认空标记 size=0）")
@@ -180,9 +218,7 @@ def main() -> int:
         print("chapter.done：不存在")
     print(f"报告软校验：{report_status}")
 
-    hard_fail = False
     if missing or nonempty:
-        hard_fail = True
         print()
         if missing:
             print(f"❌ 未闭环：缺 {len(missing)} 项必需 .done：{', '.join(missing)}")

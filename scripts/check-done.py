@@ -3,8 +3,10 @@
 
 闭环判定只认 `[书名]/.done/` **空标记**（size=0）；不读正文、不代替补跑。
 非空标记视为无效（疑似伪造/误写内容），计入未闭环。
-软校验：标记含 zhuque 时，额外 warn 审核报告是否含「人工证据包」节
-（防「只造标记不干活」；默认不阻断，`--strict-report` 时失败）。
+软校验：标记含 zhuque 时，额外 warn 审核报告「人工证据包」节的**结构证据**
+（防「只造标记/只贴标题」；默认不阻断，`--strict-report` 时失败）。
+通过条件：出现「人工证据包」标题，且证据锚点命中 ≥2 类
+（人工段/人工注入/段落位置/300字/结构破坏/对话毛刺/高疑似/密度自查 等）。
 `.done_zhuque` 存在 = 4.1b–4.1e 步骤已登记 ≠ 朱雀「人工>疑似」达标。
 
 用法：
@@ -37,6 +39,21 @@ BASE_MARKS = [
     "merge",
 ]
 
+# 4.1e 报告结构软校验：至少命中 2 类，降低「只写标题」假闭环
+EVIDENCE_MARKERS = [
+    "人工段",
+    "人工注入",
+    "段落位置",
+    "≥300",
+    "300字",
+    "约≥300",
+    "结构破坏",
+    "对话毛刺",
+    "高疑似",
+    "密度自查",
+    "人工为主",
+]
+
 
 def required_marks(chapter: int) -> list[str]:
     marks = list(BASE_MARKS)
@@ -58,7 +75,10 @@ def classify_marker(path: Path) -> str:
 
 
 def check_report_soft(project: Path, nnn: str, has_zhuque: bool) -> tuple[str, list[str]]:
-    """返回 (状态, 错误/警告消息列表)。"""
+    """返回 (状态, 错误/警告消息列表)。
+
+    状态：skipped / missing / no-section / weak-section / ok
+    """
     if not has_zhuque:
         return "skipped", []
     report_path = project / "报告" / f"第{nnn}章_全量审核报告.md"
@@ -70,6 +90,14 @@ def check_report_soft(project: Path, nnn: str, has_zhuque: bool) -> tuple[str, l
     if "人工证据包" not in text:
         return "no-section", [
             f"软校验：审核报告未出现「人工证据包」节标题（4.1e 可能未真正执行）：{report_path}"
+        ]
+    hits = [k for k in EVIDENCE_MARKERS if k in text]
+    if len(hits) < 2:
+        hit_txt = ", ".join(hits) if hits else "（无）"
+        return "weak-section", [
+            "软校验：报告含「人工证据包」标题但结构证据不足"
+            f"（证据锚点命中 {len(hits)}/≥2，需至少两类：人工段/段落位置/300字/结构破坏/对话毛刺/高疑似/密度自查 等）"
+            f"。命中：{hit_txt} → {report_path}"
         ]
     return "ok", []
 
@@ -197,6 +225,7 @@ def main() -> int:
 
     print()
     print(f"✅ 第{nnn}章必需空 .done 已齐（允许称流水线闭环；朱雀目标仍以用户回传三态为准）")
+    print("对外汇报硬约定：必须分列「流水线闭环」与「朱雀三态/待检测」；禁止只贴 .done 或本脚本 exit0 冒充检测通过")
     if report_msgs:
         print("⚠️ 软校验警告（不阻断；可用 --strict-report 将其视为失败）：")
         for m in report_msgs:

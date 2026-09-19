@@ -1,10 +1,10 @@
-﻿# ============================================================
+# ============================================================
 # 全能小说作家 - 章节 .done 客观核验脚本
 # 用途：按项目侧 `.done/` 空标记清单核验第 N 章写后流水线是否闭环。
 # 原则：闭环判定只认文件系统**空标记（size=0）**，不读正文、不代替主代理补跑。
 #       非空标记视为无效（疑似伪造/误写内容），计入未闭环。
-# 软校验：标记齐全时，额外 warn 审核报告是否含「人工证据包」节
-#         （防「只造标记不干活」的假闭环；默认不阻断）。
+# 软校验：标记齐全时，额外 warn 审核报告「人工证据包」节的结构证据
+#         （防「只造标记/只贴标题」；标题 + 证据锚点 ≥2 类才通过；默认不阻断）。
 # 注意：`.done_zhuque` 存在 = 4.1b–4.1e 步骤已登记；
 #       不等于朱雀三态已「人工 > 疑似」达标（目标仍以用户回传为准）。
 # 用法：
@@ -95,9 +95,13 @@ $chapterState = Test-MarkerState -Path $chapterFile
 $hasChapter = ($chapterState -eq 'present') -or ($chapterState -eq 'nonempty' -and $AllowNonEmpty)
 $hasZhuque = $present -contains 'zhuque'
 
-# 报告软校验：有效 zhuque 空标记存在时，看审核报告是否写了「人工证据包」
+# 报告软校验：有效 zhuque 空标记存在时，看「人工证据包」节是否有结构证据（锚点≥2类）
 $reportStatus = 'skipped'
 $reportMsgs = @()
+$evidenceMarkers = @(
+    '人工段', '人工注入', '段落位置', '≥300', '300字', '约≥300',
+    '结构破坏', '对话毛刺', '高疑似', '密度自查', '人工为主'
+)
 if ($hasZhuque) {
     $reportPath = Join-Path $ProjectPath ('报告/第{0}章_全量审核报告.md' -f $nnn)
     if (-not (Test-Path -LiteralPath $reportPath)) {
@@ -111,7 +115,18 @@ if ($hasZhuque) {
             $reportMsgs += ('软校验：审核报告未出现「人工证据包」节标题（4.1e 可能未真正执行）：{0}' -f $reportPath)
         }
         else {
-            $reportStatus = 'ok'
+            $hits = @()
+            foreach ($m in $evidenceMarkers) {
+                if ($reportText.Contains($m)) { $hits += $m }
+            }
+            if ($hits.Count -lt 2) {
+                if ($hits.Count) { $hitTxt = ($hits -join ', ') } else { $hitTxt = '（无）' }
+                $reportStatus = 'weak-section'
+                $reportMsgs += ('软校验：报告含「人工证据包」标题但结构证据不足（证据锚点命中 {0}/≥2，需至少两类：人工段/段落位置/300字/结构破坏/对话毛刺/高疑似/密度自查 等）。命中：{1} → {2}' -f $hits.Count, $hitTxt, $reportPath)
+            }
+            else {
+                $reportStatus = 'ok'
+            }
         }
     }
 }
@@ -181,6 +196,7 @@ if ($StrictReport -and $reportMsgs.Count -gt 0) {
 
 Write-Output ''
 Write-Output ('✅ 第{0}章必需空 .done 已齐（允许称流水线闭环；朱雀目标仍以用户回传三态为准）' -f $nnn)
+Write-Output '对外汇报硬约定：必须分列「流水线闭环」与「朱雀三态/待检测」；禁止只贴 .done 或本脚本 exit0 冒充检测通过'
 if ($reportMsgs.Count) {
     Write-Output '⚠️ 软校验警告（不阻断；可用 -StrictReport 将其视为失败）：'
     $reportMsgs | ForEach-Object { Write-Output ('  ' + $_) }

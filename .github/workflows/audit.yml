@@ -21,7 +21,7 @@ jobs:
         run: |
           # -StrictOrphan: 孤儿判定要求「存在指向该资产路径的引用」（堵住裸名与项目侧同名的漏报）
           # -LintTerm / -LintLineRef: 裸英文术语与裸行号引用，仅警告不阻断
-          # -LintOrder 默认开启（写后顺序/zhuque 锚点）；如需关闭：-LintOrder $false 或在 pwsh 交互里传布尔
+          # -LintOrder 为 [bool] 参数且默认 $true（写后顺序/zhuque 锚点）；如需关闭：-LintOrder:$false
           pwsh .github/scripts/audit.ps1 -Root . -StrictOrphan -LintTerm -LintLineRef
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 

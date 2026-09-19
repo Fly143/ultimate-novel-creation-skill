@@ -12,6 +12,11 @@ import sys
 import tempfile
 from pathlib import Path
 
+# Windows CI 默认 cp1252，打印中文会炸；强制 UTF-8 输出与子进程环境。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "check-done.py"
 PY = sys.executable
@@ -24,6 +29,7 @@ def run(project: Path, chapter: int, *extra: str) -> tuple[int, str]:
         text=True,
         encoding="utf-8",
         errors="replace",
+        env={**__import__("os").environ, "PYTHONIOENCODING": "utf-8"},
     )
     return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
 

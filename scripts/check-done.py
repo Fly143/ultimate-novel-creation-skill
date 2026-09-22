@@ -1,18 +1,12 @@
 #!/usr/bin/env python3
 """章节 .done 客观核验（与 scripts/check-done.ps1 同口径）。
 
-闭环判定只认 `[书名]/.done/` **空标记**（size=0）；不读正文、不代替补跑。
-非空标记视为无效（疑似伪造/误写内容），计入未闭环。
-标记/报告章号同时接受 `第NNN章`（零填充）与 `第N章`（不填充）；两者同时存在时告警并优先零填充。
-
-软校验：标记含 zhuque 时，额外 warn 审核报告「人工证据包」节的**结构证据**
-（防「只造标记/只贴标题/抄规格词表」；默认不阻断，`--strict-report` 时失败）。
-通过条件：出现「人工证据包」标题，且结构证据类别命中 ≥2 类
-**且至少含一类强证据**（须带段号/字数等结构，裸词表不算）。
-策略词（如「人工为主」「密度自查」）单独出现**不算**通过；把规格里的
-「人工段/段落位置/300字」词表原样抄进报告也**不算**强证据。
-
-`.done_zhuque` 存在 = 4.1b–4.1e 步骤已登记 ≠ 朱雀「人工>疑似」达标。
+标准：
+- 闭环只认 `[书名]/.done/` 空标记（size=0）；非空无效。
+- 标记/报告章号：`第NNN章` 与 `第N章`。
+- 软校验（有 zhuque 时）：报告须含「人工证据包」；结构证据类别 ≥2 且至少 1 类强证据
+  （强证据=带段号/字数结构，如 `人工段注入：第3段，约320字`）。
+- `.done_zhuque` = 4.1b–4.1e 已登记；朱雀达标以用户回传三态为准。
 
 用法：
   python scripts/check-done.py --project "路径/书名" --chapter 12
@@ -21,9 +15,7 @@
   python scripts/check-done.py -p . -c 12 --allow-non-empty
 
 退出码：0=必需空标记齐；1=缺标记/非空标记/路径错误（--strict-report 时报告软校验失败亦 1）
-
-注意：`--allow-non-empty` 仅限用户本地调试。宿主/LLM 做闭环核验或对外宣称时禁止携带，
-否则视为伪造闭环。
+`--allow-non-empty`：仅限用户调试；宿主/LLM 禁止携带。
 """
 
 from __future__ import annotations
@@ -48,8 +40,7 @@ BASE_MARKS = [
     "merge",
 ]
 
-# 结构证据规则：(类别, regex, 是否强证据)。
-# 强证据必须带段号/字数结构，防止把规格词表（人工段/段落位置/300字）原样抄进报告假闭环。
+# (类别, regex, 是否强证据)。强证据须带段号/字数结构。
 EVIDENCE_RULES: list[tuple[str, str, bool]] = [
     ("人工段-段号", r"人工(?:段|注入)[^\n]{0,48}?第\s*\d+\s*段", True),
     (
@@ -266,10 +257,9 @@ def main() -> int:
             print(f"❌ 未闭环：缺 {len(missing)} 项必需 .done：{', '.join(missing)}")
         if nonempty:
             print(
-                f"❌ 未闭环：{len(nonempty)} 项标记非空（契约=size0，疑似伪造或误写）："
-                f"{', '.join(nonempty)}"
+                f"❌ 未闭环：{len(nonempty)} 项标记非空（标准=size0）：{', '.join(nonempty)}"
             )
-            print("修复：清空对应 .done 文件内容（保留文件名），或删除后由流水线重写")
+            print("修复：清空对应 .done 文件内容（保留文件名），或删除后重写")
         if "zhuque" in missing:
             print(
                 "提示：缺 zhuque → 须补跑 03_26 4.1b–4.1e 人工证据包（见 modules/03_26_功能模块.md）"

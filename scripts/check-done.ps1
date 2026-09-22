@@ -1,22 +1,17 @@
 # ============================================================
-# 全能小说作家 - 章节 .done 客观核验脚本
-# 用途：按项目侧 `.done/` 空标记清单核验第 N 章写后流水线是否闭环。
-# 原则：闭环判定只认文件系统**空标记（size=0）**，不读正文、不代替主代理补跑。
-#       非空标记视为无效（疑似伪造/误写内容），计入未闭环。
-# 软校验：标记齐全时，额外 warn 审核报告「人工证据包」节的**结构证据**
-#         （防「只造标记/只贴标题/抄规格词表」；标题 + 结构证据类别 ≥2 类
-#          且至少含一类强证据——强证据须带段号/字数结构，裸词表不算；默认不阻断）。
-#         策略词（人工为主/密度自查）单独出现不算通过。
-# 注意：`.done_zhuque` 存在 = 4.1b–4.1e 步骤已登记；
-#       不等于朱雀三态已「人工 > 疑似」达标（目标仍以用户回传为准）。
+# 章节 .done 客观核验（与 scripts/check-done.py 同口径）
+# 标准：
+# - 闭环只认空标记（size=0）；非空无效。
+# - 章号：第NNN章 / 第N章。
+# - 软校验（有 zhuque）：报告须含「人工证据包」；结构证据类别 ≥2 且至少 1 类强证据
+#   （强证据=带段号/字数结构，如 人工段注入：第3段，约320字）。
+# - .done_zhuque = 4.1b–4.1e 已登记；朱雀达标以用户回传三态为准。
 # 用法：
 #   powershell -File scripts/check-done.ps1 -Project <书名目录> -Chapter 12
-#   pwsh scripts/check-done.ps1 -Project .\我的书 -Chapter 10
 #   powershell -File scripts/check-done.ps1 -Project <书名> -Chapter 12 -StrictReport
 #   powershell -File scripts/check-done.ps1 -Project <书名> -Chapter 12 -AllowNonEmpty
-# 退出码：0=必需空标记齐；1=缺标记/非空标记/路径错误（-StrictReport 时报告软校验失败亦 exit 1）
-# 章号兼容：标记/报告同时接受 第NNN章 与 第N章；两者同时存在时告警并优先零填充
-# -AllowNonEmpty：仅限用户本地调试。宿主/LLM 做闭环核验或对外宣称时禁止携带。
+# 退出码：0=必需空标记齐；1=缺标记/非空标记/路径错误（-StrictReport 时软校验失败亦 1）
+# -AllowNonEmpty：仅限用户调试；宿主/LLM 禁止携带。
 # ============================================================
 param(
     [Parameter(Mandatory = $true)][string]$Project,
@@ -233,8 +228,8 @@ if (($missing.Count -gt 0) -or ($nonempty.Count -gt 0)) {
         Write-Output ('❌ 未闭环：缺 {0} 项必需 .done：{1}' -f $missing.Count, ($missing -join ', '))
     }
     if ($nonempty.Count -gt 0) {
-        Write-Output ('❌ 未闭环：{0} 项标记非空（契约=size0，疑似伪造或误写）：{1}' -f $nonempty.Count, ($nonempty -join ', '))
-        Write-Output '修复：清空对应 .done 文件内容（保留文件名），或删除后由流水线重写'
+        Write-Output ('❌ 未闭环：{0} 项标记非空（标准=size0）：{1}' -f $nonempty.Count, ($nonempty -join ', '))
+        Write-Output '修复：清空对应 .done 文件内容（保留文件名），或删除后重写'
     }
     if ($missing -contains 'zhuque') {
         Write-Output '提示：缺 zhuque → 须补跑 03_26 4.1b–4.1e 人工证据包（见 modules/03_26_功能模块.md）'

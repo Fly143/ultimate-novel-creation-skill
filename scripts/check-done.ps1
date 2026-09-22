@@ -1,10 +1,14 @@
 # ============================================================
 # 章节 .done 客观核验（与 scripts/check-done.py 同口径）
+# 【同步约定】规则源与 scripts/check-done.py 重复维护：改 evidenceRules /
+# 标记清单 / 章号候选时必须同步另一实现，并跑
+# python .github/scripts/test-check-done.py 确认 py+ps1 双入口一致。
 # 标准：
 # - 闭环只认空标记（size=0）；非空无效。
 # - 章号：第NNN章 / 第N章。
 # - 软校验（有 zhuque）：报告须含「人工证据包」；结构证据类别 ≥2 且至少 1 类强证据
-#   （强证据=带段号/字数结构，如 人工段注入：第3段，约320字）。
+#   （强证据=人工段/段落位置与段号或字数邻接，如 人工段注入：第3段，约320字；
+#   裸字数行/裸「≥300字」不算强证据）。
 # - .done_zhuque = 4.1b–4.1e 已登记；朱雀达标以用户回传三态为准。
 # 用法：
 #   powershell -File scripts/check-done.ps1 -Project <书名目录> -Chapter 12
@@ -136,13 +140,15 @@ $hasZhuque = $present -contains 'zhuque'
 # 报告软校验：有效 zhuque 空标记存在时，看「人工证据包」节是否有结构证据（≥2类且含强证据）
 $reportStatus = 'skipped'
 $reportMsgs = @()
-# 结构证据规则：强证据必须带段号/字数结构，防止抄规格词表假闭环
+# 结构证据规则：强证据必须与人工段/段落位置邻接段号或字数，防止抄规格词表/裸字数假闭环
 $evidenceRules = @(
     @{ Name = '人工段-段号'; Pattern = '人工(?:段|注入)[^\n]{0,48}?第\s*\d+\s*段'; Strong = $true },
     @{ Name = '人工段-字数'; Pattern = '人工(?:段|注入)[^\n]{0,48}?(?:约|合计|共|至少|超过|≥|>)\s*\d+\s*字'; Strong = $true },
     @{ Name = '段落位置-段号'; Pattern = '段落位置[^\n]{0,24}?第\s*\d+\s*段'; Strong = $true },
-    @{ Name = '规模字数'; Pattern = '(?:合计|约|共|至少|超过)[^\n]{0,6}\d{3,}\s*字'; Strong = $true },
-    @{ Name = '规模-≥300字'; Pattern = '(?:≥|>)\s*300\s*字'; Strong = $true },
+    @{ Name = '人工规模-字数'; Pattern = '(?:人工(?:段|注入)?|注入)[^\n]{0,40}?(?:合计|约|共|至少|超过)[^\n]{0,6}\d{3,}\s*字'; Strong = $true },
+    @{ Name = '人工规模-≥300字'; Pattern = '人工[^\n]{0,40}?(?:≥|>)\s*300\s*字'; Strong = $true },
+    @{ Name = '规模字数'; Pattern = '(?:合计|约|共|至少|超过)[^\n]{0,6}\d{3,}\s*字'; Strong = $false },
+    @{ Name = '规模-≥300字'; Pattern = '(?:≥|>)\s*300\s*字'; Strong = $false },
     @{ Name = '结构破坏'; Pattern = '结构破坏'; Strong = $false },
     @{ Name = '对话毛刺'; Pattern = '对话毛刺'; Strong = $false },
     @{ Name = '高疑似段'; Pattern = '高疑似段'; Strong = $false },
@@ -181,7 +187,7 @@ if ($hasZhuque) {
                 if ($strongHits.Count) { $strongTxt = ($strongHits -join ', ') } else { $strongTxt = '（无）' }
                 $reportStatus = 'weak-section'
                 $strongList = $strongNames -join ' / '
-                $reportMsgs += ('软校验：报告含「人工证据包」标题但结构证据不足（证据类别命中 {0}/≥2 且须含强证据：{1}；强证据须带段号或字数结构，裸抄规格词表/策略话术不算）。命中类别：{2}；强证据：{3} → {4}' -f $hits.Count, $strongList, $hitTxt, $strongTxt, $reportPath)
+                $reportMsgs += ('软校验：报告含「人工证据包」标题但结构证据不足（证据类别命中 {0}/≥2 且须含强证据：{1}；强证据=人工段/段落位置与段号或字数邻接，裸字数、裸≥300字、抄规格词表/策略话术不算）。命中类别：{2}；强证据：{3} → {4}' -f $hits.Count, $strongList, $hitTxt, $strongTxt, $reportPath)
             }
             else {
                 $reportStatus = 'ok'

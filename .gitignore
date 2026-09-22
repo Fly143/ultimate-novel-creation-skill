@@ -1,3 +1,4 @@
 test-prompts.json
 审计报告*.md
 scripts/__pycache__/
+.github/scripts/__pycache__/

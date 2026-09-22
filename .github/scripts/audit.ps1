@@ -1,5 +1,4 @@
-﻿# ============================================================
-
+# ============================================================
 # 全能小说作家 - CI 完整性审计脚本（GitHub Actions 调用）
 # 检查：①死引用 ②孤儿文件 ③版本号一致性(SKILL vs README徽章) ④残留英文路径token
 #      ⑤裸英文术语(警告) ⑥裸行号引用(警告) ⑦写后顺序与 zhuque 门禁一致性
@@ -9,9 +8,7 @@
 #   -LintLineRef  : 额外检查「第N行」式行号引用（仅警告，不阻断）
 #   -LintOrder    : 额外检查写后顺序权威（先朱雀后修复）与 .done_zhuque 语义锚点（默认开启可单独关：-LintOrder:$false）
 # 发现问题输出清单并 exit 1（CI 失败）；全部通过 exit 0。
-
 # ============================================================
-
 param(
     [string]$Root = (Get-Location).Path,
     [switch]$StrictOrphan,
@@ -249,7 +246,7 @@ if($LintOrder){
   }
   # 禁止把错误顺序写成必做（「禁止/不得」语境豁免）
   $wrongOrderRe = '(先修复再朱雀|修复\s*→\s*朱雀|修复\s*→\s*\.done_zhuque|修复后再(跑)?朱雀|修复，再(跑)?朱雀)'
-  $allowRe = '(禁止|不得|禁写|错误顺序|互斥|勿写|不要写|不要|禁止写成|不得写成)'
+  $allowRe = '(禁止|不得|禁写|勿写|错误顺序|互斥|不要写成|不要写|禁止写成|不得写成|禁止把|不得把)'
   $orderHits = @()
   Get-ChildItem -Recurse -File $Root -Filter *.md | ForEach-Object {
     $rel = $_.FullName.Substring($Root.Length+1) -replace '\\','/'

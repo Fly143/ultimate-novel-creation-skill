@@ -25,11 +25,12 @@ jobs:
           pwsh .github/scripts/audit.ps1 -Root . -StrictOrphan -LintTerm -LintLineRef
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: check-done 回归测试
+      - name: check-done 回归测试（py + ps1 双入口）
         shell: pwsh
         env:
           PYTHONIOENCODING: utf-8
           PYTHONUTF8: "1"
         run: |
+          # 同一组 fixture 对 check-done.py 与 check-done.ps1 双跑；windows-latest 自带 powershell
           python .github/scripts/test-check-done.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

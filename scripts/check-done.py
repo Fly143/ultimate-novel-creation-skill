@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
 """章节 .done 客观核验（与 scripts/check-done.ps1 同口径）。
 
+【同步约定】规则源与 scripts/check-done.ps1 重复维护：改 EVIDENCE_RULES /
+BASE_MARKS / 章号候选时必须同步另一实现，并跑
+`python .github/scripts/test-check-done.py` 确认 py+ps1 双入口一致。
+
 标准：
 - 闭环只认 `[书名]/.done/` 空标记（size=0）；非空无效。
 - 标记/报告章号：`第NNN章` 与 `第N章`。
 - 软校验（有 zhuque 时）：报告须含「人工证据包」；结构证据类别 ≥2 且至少 1 类强证据
-  （强证据=带段号/字数结构，如 `人工段注入：第3段，约320字`）。
+  （强证据=人工段/段落位置与段号或字数邻接，如 `人工段注入：第3段，约320字`；
+  裸字数行如「本章合计约2500字」/裸「≥300字」不算强证据）。
 - `.done_zhuque` = 4.1b–4.1e 已登记；朱雀达标以用户回传三态为准。
 
 用法：
@@ -40,7 +45,9 @@ BASE_MARKS = [
     "merge",
 ]
 
-# (类别, regex, 是否强证据)。强证据须带段号/字数结构。
+# (类别, regex, 是否强证据)。
+# 强证据必须与「人工段/人工注入/段落位置」邻接段号或字数结构；
+# 裸字数/裸「≥300字」仅作弱证据（防「本章合计约2500字」假阳）。
 EVIDENCE_RULES: list[tuple[str, str, bool]] = [
     ("人工段-段号", r"人工(?:段|注入)[^\n]{0,48}?第\s*\d+\s*段", True),
     (
@@ -49,8 +56,15 @@ EVIDENCE_RULES: list[tuple[str, str, bool]] = [
         True,
     ),
     ("段落位置-段号", r"段落位置[^\n]{0,24}?第\s*\d+\s*段", True),
-    ("规模字数", r"(?:合计|约|共|至少|超过)[^\n]{0,6}\d{3,}\s*字", True),
-    ("规模-≥300字", r"(?:≥|>)\s*300\s*字", True),
+    (
+        "人工规模-字数",
+        r"(?:人工(?:段|注入)?|注入)[^\n]{0,40}?(?:合计|约|共|至少|超过)[^\n]{0,6}\d{3,}\s*字",
+        True,
+    ),
+    ("人工规模-≥300字", r"人工[^\n]{0,40}?(?:≥|>)\s*300\s*字", True),
+    # 弱证据：可凑类别数，单独出现不足以过 --strict-report
+    ("规模字数", r"(?:合计|约|共|至少|超过)[^\n]{0,6}\d{3,}\s*字", False),
+    ("规模-≥300字", r"(?:≥|>)\s*300\s*字", False),
     ("结构破坏", r"结构破坏", False),
     ("对话毛刺", r"对话毛刺", False),
     ("高疑似段", r"高疑似段", False),
@@ -126,38 +140,53 @@ def match_evidence(text: str) -> tuple[list[str], list[str], list[str]]:
 
 def check_report_soft(
     project: Path, nnn: str, chapter: int, has_zhuque: bool
-) -> tuple[str, list[str]]:
-    """返回 (状态, 错误/警告消息列表)。
+) -> tuple[str, list[str], list[str]]:
+    """返回 (状态, 错误/警告消息列表, 章号冲突告警)。
 
     状态：skipped / missing / no-section / weak-section / ok
     """
     if not has_zhuque:
-        return "skipped", []
+        return "skipped", [], []
     report_dir = project / "报告"
-    report_path, _ = resolve_existing(report_dir, nnn, chapter, "_全量审核报告.md")
+    report_path, report_warns = resolve_existing(
+        report_dir, nnn, chapter, "_全量审核报告.md"
+    )
     if report_path is None or not report_path.is_file():
         expected = " / ".join(
             str(report_dir / n) for n in _candidate_names(nnn, chapter, "_全量审核报告.md")
         )
-        return "missing", [
-            f"软校验：存在 .done_zhuque，但未找到审核报告（疑似只造标记未写报告）：{expected}"
-        ]
+        return (
+            "missing",
+            [
+                f"软校验：存在 .done_zhuque，但未找到审核报告（疑似只造标记未写报告）：{expected}"
+            ],
+            report_warns,
+        )
     text = report_path.read_text(encoding="utf-8", errors="replace")
     if "人工证据包" not in text:
-        return "no-section", [
-            f"软校验：审核报告未出现「人工证据包」节标题（4.1e 可能未真正执行）：{report_path}"
-        ]
+        return (
+            "no-section",
+            [
+                f"软校验：审核报告未出现「人工证据包」节标题（4.1e 可能未真正执行）：{report_path}"
+            ],
+            report_warns,
+        )
     hits, strong_hits, strong_names = match_evidence(text)
     if len(hits) < 2 or not strong_hits:
         hit_txt = ", ".join(hits) if hits else "（无）"
         strong_txt = ", ".join(strong_hits) if strong_hits else "（无）"
-        return "weak-section", [
-            "软校验：报告含「人工证据包」标题但结构证据不足"
-            f"（证据类别命中 {len(hits)}/≥2 且须含强证据：{ ' / '.join(strong_names) }；"
-            "强证据须带段号或字数结构，裸抄规格词表/策略话术不算）"
-            f"。命中类别：{hit_txt}；强证据：{strong_txt} → {report_path}"
-        ]
-    return "ok", []
+        return (
+            "weak-section",
+            [
+                "软校验：报告含「人工证据包」标题但结构证据不足"
+                f"（证据类别命中 {len(hits)}/≥2 且须含强证据：{ ' / '.join(strong_names) }；"
+                "强证据=人工段/段落位置与段号或字数邻接；裸字数、裸≥300字、"
+                "抄规格词表/策略话术不算强证据）"
+                f"。命中类别：{hit_txt}；强证据：{strong_txt} → {report_path}"
+            ],
+            report_warns,
+        )
+    return "ok", [], report_warns
 
 
 def main() -> int:
@@ -224,9 +253,8 @@ def main() -> int:
     )
     has_zhuque = "zhuque" in present
 
-    report_status, report_msgs = check_report_soft(project, nnn, chapter, has_zhuque)
-    report_path, report_warns = resolve_existing(
-        project / "报告", nnn, chapter, "_全量审核报告.md"
+    report_status, report_msgs, report_warns = check_report_soft(
+        project, nnn, chapter, has_zhuque
     )
     name_conflicts.extend(report_warns)
 

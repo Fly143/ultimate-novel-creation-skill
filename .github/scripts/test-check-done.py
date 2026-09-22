@@ -124,6 +124,24 @@ GOOD_REPORT = (
 
 WEAK_REPORT = "# 审核\n## 人工证据包\n已注入\n"
 
+# 裸字数 + 弱锚点：不得过 strict（防「本章合计约2500字」假阳）
+FAKE_WORDCOUNT_REPORT = (
+    "# 审核报告\n"
+    "## 人工证据包\n"
+    "- 本章合计约2500字\n"
+    "- ≥300字\n"
+    "- 结构破坏\n"
+    "- 对话毛刺\n"
+)
+
+# 仅策略话术/规格词表，无结构强证据
+STRATEGY_ONLY_REPORT = (
+    "# 审核\n"
+    "## 人工证据包\n"
+    "- 人工为主，密度自查通过\n"
+    "- 按人工为主协议执行强化轮\n"
+)
+
 
 def case(name: str, ok: bool, cond: bool, detail: str = "") -> bool:
     status = "PASS" if cond == ok else "FAIL"
@@ -193,6 +211,22 @@ def main() -> int:
             True,
             lambda e, p=p3: run(p, 1, "--strict-report", engine=e)[0] == 1,
         )
+
+        write_report(p3, 1, FAKE_WORDCOUNT_REPORT)
+        results += check_engines(
+            "strict 裸字数+弱锚点 → exit1",
+            True,
+            lambda e, p=p3: run(p, 1, "--strict-report", engine=e)[0] == 1,
+        )
+
+        write_report(p3, 1, STRATEGY_ONLY_REPORT)
+        results += check_engines(
+            "strict 仅策略话术 → exit1",
+            True,
+            lambda e, p=p3: run(p, 1, "--strict-report", engine=e)[0] == 1,
+        )
+
+        write_report(p3, 1, GOOD_REPORT)
 
         p4 = tmp_path / "p4"
         empty_done(p4, 1, BASE)

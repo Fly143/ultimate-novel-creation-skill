@@ -1,7 +1,7 @@
 ---
 feature: zhuque-human-and-pipeline-gates
 status: delivered
-updated: 2026-09-19
+updated: 2026-09-22
 branch: fix/zhuque-human-and-pipeline-gates
 commits: 86607cb..HEAD # v9.6.0 delivery + order/audit/check-done hardening + structural soft-check
 ---
@@ -18,7 +18,8 @@ commits: 86607cb..HEAD # v9.6.0 delivery + order/audit/check-done hardening + st
 5）**三轮外部审阅修复（全修补丁）**：`check-done.ps1` 全文中文化并修复坏触发词 `buque/xiehou`→「补缺/写后」；双脚本增加审核报告「人工证据包」节**软校验**（`-StrictReport`/`--strict-report` 可升硬失败）；README/SKILL/system_prompt/00 显式**双验收口径**（流水线闭环 vs 朱雀检测达标；纯 AI 全自动不保证「人工>疑似」）；00 命令表收敛为触发索引、写后顺序唯一权威=「写后流水线」节；`audit.ps1` LintOrder 扩锚点 + 双验收/真人介入文案 warn + 软校验文档提及检查。  
 6）**六轮外部工程审阅修复（本补丁）**：check-done 软校验从「子串命中」升级为**结构证据**（标题 + 证据锚点 ≥2 类：人工段/段落位置/300字/结构破坏/对话毛刺/高疑似/密度自查）；双脚本与文档对齐 `weak-section` 状态；状态回执与权威文件写死**对外汇报硬约定**（闭环与三态分列，禁止只贴 `.done`/exit0 冒充检测通过）；`audit.yml` 修正 `-LintOrder:$false` 传参说明；回归用例覆盖弱结构证据路径。
 7）**口径修订**：skill 正文只写执行与标准；check-done 强证据=段号/字数结构；回归保留契约用例（py+ps1）；`--allow-non-empty` 仅限用户调试。  
-7）**七轮外部审阅修复（本补丁）**：①03_26 §4.1 三态表 FAIL/建议路径补写「先 4.1b–4.1e → `.done_zhuque` → 再修复」；②check-done 软校验去掉策略词锚点（`人工为主` 等），改为「≥2 类且至少 1 类强证据（人工段/人工注入/段落位置/300字/≥300）」；③双脚本章号兼容 `第NNN章`/`第N章`；④SKILL 权威链条措辞澄清、规格 T13 去重、回归补策略话术/无强证据/不填充章号用例。
+8）**七轮外部审阅修复（本补丁）**：①03_26 §4.1 三态表 FAIL/建议路径补写「先 4.1b–4.1e → `.done_zhuque` → 再修复」；②check-done 软校验去掉策略词锚点（`人工为主` 等），改为「≥2 类且至少 1 类强证据（人工段/人工注入/段落位置/300字/≥300）」；③双脚本章号兼容 `第NNN章`/`第N章`；④SKILL 权威链条措辞澄清、规格 T13 去重、回归补策略话术/无强证据/不填充章号用例。  
+9）**九轮外部审阅修复（本补丁）**：①强证据改为**人工/段落位置邻接**段号或字数，裸字数（「本章合计约2500字」）与裸「≥300字」降为弱证据；②双脚本头注释写死规则同步约定；③`check-report_soft` 合并重复 `resolve_existing`；④规格 Report 编号去重、Verification 口径对齐最终回归数；⑤`audit.ps1` 禁令词去掉裸「不要」并清理头注释空行；⑥回归补「裸字数+弱锚点」「仅策略话术」负向用例。
 
 **Verification** —  
 - `powershell -File .github/scripts/audit.ps1 -Root <repo> -StrictOrphan -LintTerm -LintLineRef` → PASS（死引用0 / 孤儿0 / 版本9.6.0 / 无残留英文路径 / 写后顺序一致；`-LintOrder` 默认开启）  
@@ -28,7 +29,9 @@ commits: 86607cb..HEAD # v9.6.0 delivery + order/audit/check-done hardening + st
 - 第三轮审阅修复：硬门禁工具化 / 语义边界 / 顺序 lint / 命令表去重 / 指标表降参考 / 规格 commits 更正 → 已落地
 - 第四轮外部审阅「全修」：check-done 回执语言与坏触发词 / 报告软校验 / 双验收文案 / 00 双表索引化 / audit LintOrder 补强 → 本补丁落地；本地 `audit.ps1` + 合成项目跑 `check-done` 验证
 - 第六轮外部工程审阅：结构软校验 + 对外汇报硬约定 + CI 注释修正 → 本地 audit PASS + check-done 回归 PASS（含 weak-section 用例）
-- 第七轮外部审阅：§4.1 表序补齐 + 软校验强证据门槛 + 章号兼容 → 本地 audit PASS + check-done 回归 29/29 PASS（含策略话术拒绝）
+- 第七轮外部审阅：§4.1 表序补齐 + 软校验强证据门槛 + 章号兼容 → 本地 audit PASS + check-done 回归 PASS（含策略话术拒绝）
+- 八轮外部审阅：结构证据防抄词表 + ps1 双入口回归 + allow-non-empty 禁令 → 本地 `test-check-done.py` py+ps1 全绿 + audit PASS
+- 九轮外部审阅：强证据邻接收紧（裸字数/裸≥300字降弱）+ 双实现同步约定 + audit 禁令词/空行 + 规格编号与 Verification 口径 → 本地 `test-check-done.py` **28/28 PASS**（py+ps1）+ `audit.ps1` PASS
 
 **Journey log** —  
 1. 本地未提交的朱雀优化在 `git reset --hard origin/main` 后被丢弃；远程 origin/main **没有** 4.1e，需从零写入而非增量改。  
@@ -42,6 +45,8 @@ commits: 86607cb..HEAD # v9.6.0 delivery + order/audit/check-done hardening + st
 9. 第四轮外部审阅指出：ps1 回执混语且 `buque/xiehou` 无法对应触发词；空标记可被造假；「人工>疑似」在全自动下可能不可达却写成硬验收；00 命令表仍可能漂移。处理：脚本中文化 + 报告软校验 + 双验收表 + 命令表索引化 + audit 扩锚点。
 10. 第六轮外部工程审阅指出：软校验只要子串「人工证据包」即可过 strict，仍可被「只贴标题」绕过；对外用 check-done exit0 冒充检测通过的口子仍在。处理：结构锚点≥2类 + 状态回执/权威文件写死对外汇报硬约定。  
 11. 第七轮外部审阅指出：§4.1 表 FAIL/建议行未写先朱雀，易再读成「先修复」；软校验锚点含「人工为主/密度自查」等策略词，抄协议原文即可过 strict；`第1章_*` 旧章号被误判全缺。处理：表序补齐 + 强证据门槛 + 章号双格式兼容。
+12. 八轮外部审阅指出：结构匹配仍可被抄词表打穿；ps1 无回归覆盖；`--allow-non-empty` 可伪造闭环。处理：强证据结构匹配 + py/ps1 双入口回归 + 禁令与运行时警示。
+13. 九轮外部审阅指出：「规模字数/≥300字」裸匹配可被正常字数行假阳；双实现规则源重复无同步约定；规格两个 7）编号冲突、Verification 用例数口径漂移；`audit.ps1` 裸「不要」豁免过宽。处理：强证据邻接收紧 + 弱证据降级 + 同步注释 + 编号/口径修正 + 禁令词收紧。
 
 ## [S1] Problem
 
@@ -204,3 +209,4 @@ commits: 86607cb..HEAD # v9.6.0 delivery + order/audit/check-done hardening + st
 - [x] T12: 五轮工程审阅修复 — acceptance: audit.ps1 去空行污染（约53%空白降至正常）；check-done 只认空标记 size=0（非空默认无效，`--allow-non-empty`/`-AllowNonEmpty` 兼容）；缺标记路径也输出报告软校验诊断；新增 `.github/scripts/test-check-done.py` 回归（19 用例）；文档明确空标记契约；本地 audit + test PASS
 - [x] T13: 六轮外部工程审阅修复 — acceptance: check-done 软校验=标题+证据锚点≥2类（weak-section）；双脚本同口径；00/SKILL/README/system_prompt/03_26/清单/对策 含结构软校验与对外汇报硬约定；audit.yml 注释改为 `-LintOrder:$false`；回归覆盖弱证据/强证据/对外硬约定；本地 audit + test PASS
 - [x] T14: 七轮外部审阅修复 — acceptance: 03_26 §4.1 FAIL/建议行含「先 4.1b–4.1e → zhuque → 再修复」；check-done 软校验去策略词且须强证据；双脚本兼容 `第N章`/`第NNN章`；SKILL 权威链条澄清；规格无重复 T13；回归新增策略话术/无强证据/不填充章号用例并 PASS；本地 audit PASS
+- [x] T15: 九轮外部审阅修复 — acceptance: 裸字数/裸≥300字不再算强证据（py+ps1 同步）；双脚本含规则同步约定注释；规格 Report 编号唯一且 Verification 口径与最终回归一致；audit `$allowRe` 无裸「不要」；回归含「裸字数+弱锚点」「仅策略话术」负向用例；本地 test-check-done **28/28** + audit PASS

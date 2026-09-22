@@ -17,7 +17,7 @@ commits: 86607cb..HEAD # v9.6.0 delivery + order/audit/check-done hardening + st
 4）**二轮审阅修复（本补丁）**：新增 `scripts/check-done.ps1` + `scripts/check-done.py` 客观 `.done` 核验；权威文件显式 `.done_zhuque ≠ 朱雀达标`；`audit.ps1` 增加写后顺序/zhuque 锚点 lint（`-LintOrder` 默认开）；00 双表登记收敛；检查清单 AI率表降为参考分档；规格 `commits` 更正为 `86607cb..HEAD`。  
 5）**三轮外部审阅修复（全修补丁）**：`check-done.ps1` 全文中文化并修复坏触发词 `buque/xiehou`→「补缺/写后」；双脚本增加审核报告「人工证据包」节**软校验**（`-StrictReport`/`--strict-report` 可升硬失败）；README/SKILL/system_prompt/00 显式**双验收口径**（流水线闭环 vs 朱雀检测达标；纯 AI 全自动不保证「人工>疑似」）；00 命令表收敛为触发索引、写后顺序唯一权威=「写后流水线」节；`audit.ps1` LintOrder 扩锚点 + 双验收/真人介入文案 warn + 软校验文档提及检查。  
 6）**六轮外部工程审阅修复（本补丁）**：check-done 软校验从「子串命中」升级为**结构证据**（标题 + 证据锚点 ≥2 类：人工段/段落位置/300字/结构破坏/对话毛刺/高疑似/密度自查）；双脚本与文档对齐 `weak-section` 状态；状态回执与权威文件写死**对外汇报硬约定**（闭环与三态分列，禁止只贴 `.done`/exit0 冒充检测通过）；`audit.yml` 修正 `-LintOrder:$false` 传参说明；回归用例覆盖弱结构证据路径。
-7）**七轮外部工程审阅修复**：强证据改为**结构匹配**（段号/字数邻接），堵住「抄规格词表」假闭环；`test-check-done.py` 对 `check-done.py`+`check-done.ps1` **双入口**回归；章号双命名并存告警；`--allow-non-empty` 文档禁令 + 运行时警示；报告缺失诊断打印完整候选路径。  
+7）**口径修订**：skill 正文只写执行与标准；check-done 强证据=段号/字数结构；回归保留契约用例（py+ps1）；`--allow-non-empty` 仅限用户调试。  
 7）**七轮外部审阅修复（本补丁）**：①03_26 §4.1 三态表 FAIL/建议路径补写「先 4.1b–4.1e → `.done_zhuque` → 再修复」；②check-done 软校验去掉策略词锚点（`人工为主` 等），改为「≥2 类且至少 1 类强证据（人工段/人工注入/段落位置/300字/≥300）」；③双脚本章号兼容 `第NNN章`/`第N章`；④SKILL 权威链条措辞澄清、规格 T13 去重、回归补策略话术/无强证据/不填充章号用例。
 
 **Verification** —  

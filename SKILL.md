@@ -64,6 +64,6 @@ version: 9.6.0
 - **朱雀检测达标** = 用户回传三态「人工 > 疑似」——以检测器+用户为准；**`.done_zhuque` 存在 ≠ 检测已通过**。
 - 纯 AI 全自动常停在「疑似」；要稳定过检测通常需真人重写关键句。禁止把闭环说成过关。
 - **对外汇报硬约定**：回执分列（a）流水线/check-done 结果（b）朱雀三态或「待检测」；禁止只贴 `.done` 或 exit0 冒充检测通过。
-- 客观核验可选 `scripts/check-done.ps1` / `scripts/check-done.py`（**只认空标记 size=0，非空无效**；报告「人工证据包」节**结构软校验**：标题 + 结构证据类别 ≥2 类且至少含一类强证据——强证据须带段号/字数结构（如「人工段注入：第3段，约320字」），**裸抄规格词表/策略话术不算**；`-StrictReport`/`--strict-report` 可升硬失败）。**`--allow-non-empty`/`-AllowNonEmpty` 仅限用户本地调试；宿主/LLM 做闭环核验或对外宣称时禁止携带。**
+- 客观核验可选 `scripts/check-done.ps1` / `scripts/check-done.py`（**只认空标记 size=0，非空无效**；报告「人工证据包」节**结构软校验**：标题 + 结构证据类别 ≥2 类且至少含一类强证据（须带段号/字数结构，如 `人工段注入：第3段，约320字`）；`-StrictReport`/`--strict-report` 可升硬失败）。**`--allow-non-empty`/`-AllowNonEmpty` 仅限用户调试；宿主/LLM 禁止携带。**
 
 ---

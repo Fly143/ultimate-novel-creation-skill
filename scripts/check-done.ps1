@@ -1,27 +1,30 @@
 # ============================================================
 # 章节 .done 客观核验（与 scripts/check-done.py 同口径）
-# 【同步约定】规则源与 scripts/check-done.py 重复维护：改 evidenceRules /
-# 标记清单 / 章号候选时必须同步另一实现，并跑
-# python .github/scripts/test-check-done.py 确认 py+ps1 双入口一致。
+# 【同步约定】规则源 = scripts/check-done-rules.json（单源）。
+# 改规则只改 JSON，并跑 python .github/scripts/test-check-done.py 确认双入口一致。
 # 标准：
 # - 闭环只认空标记（size=0）；非空无效。
 # - 章号：第NNN章 / 第N章。
-# - 软校验（有 zhuque）：报告须含「人工证据包」；结构证据类别 ≥2 且至少 1 类强证据
-#   （强证据=人工段/段落位置与段号或字数邻接，如 人工段注入：第3段，约320字；
-#   裸字数行/裸「≥300字」不算强证据）。
+# - 默认硬校验（有 zhuque）：报告须含「人工证据包」；结构证据 ≥2 类且含强证据；
+#   报告声明段号不得超过正文段落数。-SoftReport 降为警告。
+# - 默认要求 chapter.done；-NoChapterDone 仅供流水线中途检查。
 # - .done_zhuque = 4.1b–4.1e 已登记；朱雀达标以用户回传三态为准。
 # 用法：
 #   powershell -File scripts/check-done.ps1 -Project <书名目录> -Chapter 12
-#   powershell -File scripts/check-done.ps1 -Project <书名> -Chapter 12 -StrictReport
+#   powershell -File scripts/check-done.ps1 -Project <书名> -Chapter 12 -SoftReport
+#   powershell -File scripts/check-done.ps1 -Project <书名> -Chapter 12 -NoChapterDone
 #   powershell -File scripts/check-done.ps1 -Project <书名> -Chapter 12 -AllowNonEmpty
-# 退出码：0=必需空标记齐；1=缺标记/非空标记/路径错误（-StrictReport 时软校验失败亦 1）
-# -AllowNonEmpty：仅限用户调试；宿主/LLM 禁止携带。
+# 退出码：0=必需空标记齐且默认硬校验通过；1=失败。
+# -AllowNonEmpty / -SoftReport / -NoChapterDone：闭环宣称禁止使用。
+# -StrictReport / -IncludeChapterDone：兼容别名（默认已生效）。
 # ============================================================
 param(
     [Parameter(Mandatory = $true)][string]$Project,
     [Parameter(Mandatory = $true)][int]$Chapter,
     [switch]$IncludeChapterDone,
     [switch]$StrictReport,
+    [switch]$SoftReport,
+    [switch]$NoChapterDone,
     [switch]$AllowNonEmpty
 )
 
@@ -57,23 +60,26 @@ if (-not (Test-Path -LiteralPath $doneDir)) {
 }
 
 $nnn = '{0:d3}' -f $Chapter
-$required = @(
-    'wordcount',
-    'bible',
-    'summary',
-    'zhuque',
-    'gates',
-    'constraints',
-    'logic_causal',
-    'review',
-    'quality',
-    'coherence',
-    'rhythm',
-    'merge'
-)
+
+$rulesPath = Join-Path $PSScriptRoot 'check-done-rules.json'
+if (-not (Test-Path -LiteralPath $rulesPath)) {
+    Write-Output ('❌ 缺少规则单源：{0}' -f $rulesPath)
+    exit 1
+}
+$rules = Get-Content -LiteralPath $rulesPath -Raw -Encoding UTF8 | ConvertFrom-Json
+$required = @($rules.base_marks | ForEach-Object { [string]$_ })
 if (($Chapter % 10) -eq 0) {
     $required += 'innovation'
 }
+$sectionTitle = [string]$rules.section_title
+$minHits = [int]$rules.min_hits
+$requireStrong = [bool]$rules.require_strong
+$claimParaRe = [string]$rules.claim_para_pattern
+$evidenceRules = @()
+foreach ($r in $rules.evidence_rules) {
+    $evidenceRules += @{ Name = [string]$r.name; Pattern = [string]$r.pattern; Strong = [bool]$r.strong }
+}
+$strongNames = @($evidenceRules | Where-Object { $_.Strong } | ForEach-Object { $_.Name })
 
 function Get-ChapterCandidates {
     param([string]$Nnn, [int]$Ch, [string]$Suffix)
@@ -112,6 +118,50 @@ function Test-MarkerByChapter {
     return @{ State = (Test-MarkerState -Path $resolved.Path); Warnings = $resolved.Warnings }
 }
 
+function Count-BodyParagraphs {
+    param([string]$Text)
+    $blocks = New-Object System.Collections.Generic.List[string]
+    $cur = New-Object System.Collections.Generic.List[string]
+    foreach ($raw in ($Text -split "`r?`n")) {
+        $line = $raw.Trim()
+        if ($line -eq '') {
+            if ($cur.Count -gt 0) { $blocks.Add(($cur -join "`n")); $cur.Clear() }
+            continue
+        }
+        $cur.Add($line)
+    }
+    if ($cur.Count -gt 0) { $blocks.Add(($cur -join "`n")) }
+    if ($blocks.Count -eq 0) { return 0 }
+    $start = 0
+    if ($blocks.Count -gt 1) {
+        $first = $blocks[0]
+        if ($first.Length -gt 1 -and ($first.StartsWith('第') -or $first.Contains('章'))) {
+            $start = 1
+        }
+    }
+    $body = @()
+    for ($i = $start; $i -lt $blocks.Count; $i++) { $body += $blocks[$i] }
+    if ($blocks.Count -eq 1 -and $blocks[0].Contains("`n")) {
+        $lines = @($blocks[0] -split "`n" | Where-Object { $_.Trim() -ne '' })
+        if ($lines.Count -gt 1) {
+            if ($lines[0].StartsWith('第')) { return [Math]::Max(0, $lines.Count - 1) }
+            return $lines.Count
+        }
+    }
+    return $body.Count
+}
+
+function Find-BodyFile {
+    param([string]$ProjectRoot, [string]$Nnn, [int]$Ch)
+    $bodyDir = Join-Path $ProjectRoot '正文'
+    if (-not (Test-Path -LiteralPath $bodyDir)) { return $null }
+    foreach ($prefix in @(('第{0}章' -f $Nnn), ('第{0}章' -f $Ch))) {
+        $matches = @(Get-ChildItem -LiteralPath $bodyDir -Filter ($prefix + '*.txt') -File -ErrorAction SilentlyContinue | Sort-Object Name)
+        if ($matches.Count -gt 0) { return $matches[0].FullName }
+    }
+    return $null
+}
+
 $present = @()
 $nonempty = @()
 $missing = @()
@@ -137,24 +187,9 @@ $chapterState = $chapterResolved.State
 $hasChapter = ($chapterState -eq 'present') -or ($chapterState -eq 'nonempty' -and $AllowNonEmpty)
 $hasZhuque = $present -contains 'zhuque'
 
-# 报告软校验：有效 zhuque 空标记存在时，看「人工证据包」节是否有结构证据（≥2类且含强证据）
+# 报告硬校验（有 zhuque）：标题 + 结构证据 + 正文段号交叉
 $reportStatus = 'skipped'
 $reportMsgs = @()
-# 结构证据规则：强证据必须与人工段/段落位置邻接段号或字数，防止抄规格词表/裸字数假闭环
-$evidenceRules = @(
-    @{ Name = '人工段-段号'; Pattern = '人工(?:段|注入)[^\n]{0,48}?第\s*\d+\s*段'; Strong = $true },
-    @{ Name = '人工段-字数'; Pattern = '人工(?:段|注入)[^\n]{0,48}?(?:约|合计|共|至少|超过|≥|>)\s*\d+\s*字'; Strong = $true },
-    @{ Name = '段落位置-段号'; Pattern = '段落位置[^\n]{0,24}?第\s*\d+\s*段'; Strong = $true },
-    @{ Name = '人工规模-字数'; Pattern = '(?:人工(?:段|注入)?|注入)[^\n]{0,40}?(?:合计|约|共|至少|超过)[^\n]{0,6}\d{3,}\s*字'; Strong = $true },
-    @{ Name = '人工规模-≥300字'; Pattern = '人工[^\n]{0,40}?(?:≥|>)\s*300\s*字'; Strong = $true },
-    @{ Name = '规模字数'; Pattern = '(?:合计|约|共|至少|超过)[^\n]{0,6}\d{3,}\s*字'; Strong = $false },
-    @{ Name = '规模-≥300字'; Pattern = '(?:≥|>)\s*300\s*字'; Strong = $false },
-    @{ Name = '结构破坏'; Pattern = '结构破坏'; Strong = $false },
-    @{ Name = '对话毛刺'; Pattern = '对话毛刺'; Strong = $false },
-    @{ Name = '高疑似段'; Pattern = '高疑似段'; Strong = $false },
-    @{ Name = '密度自查'; Pattern = '密度自查'; Strong = $false }
-)
-$strongNames = @($evidenceRules | Where-Object { $_.Strong } | ForEach-Object { $_.Name })
 
 if ($hasZhuque) {
     $reportDir = Join-Path $ProjectPath '报告'
@@ -165,13 +200,13 @@ if ($hasZhuque) {
     if ($null -eq $reportPath -or -not (Test-Path -LiteralPath $reportPath)) {
         $reportStatus = 'missing'
         $expected = ($reportCandidates | ForEach-Object { Join-Path $reportDir $_ }) -join ' / '
-        $reportMsgs += ('软校验：存在 .done_zhuque，但未找到审核报告（疑似只造标记未写报告）：{0}' -f $expected)
+        $reportMsgs += ('报告校验：存在 .done_zhuque，但未找到审核报告（疑似只造标记未写报告）：{0}' -f $expected)
     }
     else {
         $reportText = [System.IO.File]::ReadAllText($reportPath, $enc)
-        if ($reportText -notmatch '人工证据包') {
+        if (-not $reportText.Contains($sectionTitle)) {
             $reportStatus = 'no-section'
-            $reportMsgs += ('软校验：审核报告未出现「人工证据包」节标题（4.1e 可能未真正执行）：{0}' -f $reportPath)
+            $reportMsgs += ('报告校验：审核报告未出现「{0}」节标题（4.1e 可能未真正执行）：{1}' -f $sectionTitle, $reportPath)
         }
         else {
             $hits = @()
@@ -182,21 +217,48 @@ if ($hasZhuque) {
                     if ($rule.Strong) { $strongHits += $rule.Name }
                 }
             }
-            if ($hits.Count -lt 2 -or $strongHits.Count -lt 1) {
+            if (($hits.Count -lt $minHits) -or ($requireStrong -and $strongHits.Count -lt 1)) {
                 if ($hits.Count) { $hitTxt = ($hits -join ', ') } else { $hitTxt = '（无）' }
                 if ($strongHits.Count) { $strongTxt = ($strongHits -join ', ') } else { $strongTxt = '（无）' }
                 $reportStatus = 'weak-section'
                 $strongList = $strongNames -join ' / '
-                $reportMsgs += ('软校验：报告含「人工证据包」标题但结构证据不足（证据类别命中 {0}/≥2 且须含强证据：{1}；强证据=人工段/段落位置与段号或字数邻接，裸字数、裸≥300字、抄规格词表/策略话术不算）。命中类别：{2}；强证据：{3} → {4}' -f $hits.Count, $strongList, $hitTxt, $strongTxt, $reportPath)
+                $reportMsgs += ('报告校验：报告含「人工证据包」标题但结构证据不足（证据类别命中 {0}/≥{1} 且须含强证据：{2}；强证据=人工段/人工注入/段落位置与段号或字数邻接）。命中类别：{3}；强证据：{4} → {5}' -f $hits.Count, $minHits, $strongList, $hitTxt, $strongTxt, $reportPath)
             }
             else {
-                $reportStatus = 'ok'
+                $bodyFile = Find-BodyFile -ProjectRoot $ProjectPath -Nnn $nnn -Ch $Chapter
+                $bodyFail = $false
+                if ($null -ne $bodyFile) {
+                    $paraMatches = [regex]::Matches($reportText, $claimParaRe)
+                    $maxClaim = 0
+                    foreach ($m in $paraMatches) {
+                        $n = 0
+                        if ([int]::TryParse($m.Groups[1].Value, [ref]$n)) {
+                            if ($n -gt $maxClaim) { $maxClaim = $n }
+                        }
+                    }
+                    if ($maxClaim -gt 0) {
+                        $bodyText = [System.IO.File]::ReadAllText($bodyFile, $enc)
+                        $paraN = Count-BodyParagraphs -Text $bodyText
+                        if ($paraN -gt 0 -and $maxClaim -gt $paraN) {
+                            $bodyFail = $true
+                            $reportStatus = 'body-mismatch'
+                            $reportMsgs += ('正文交叉校验：报告声明最大段号 第{0}段，但正文仅约 {1} 段（报告段号必须落在正文范围内）→ {2}' -f $maxClaim, $paraN, $bodyFile)
+                        }
+                    }
+                }
+                if (-not $bodyFail) { $reportStatus = 'ok' }
             }
         }
     }
 }
-Write-Output ('【check-done】项目={0} 章节=第{1}章' -f $ProjectPath, $nnn)
-Write-Output ('必需标记数：{0}（10 倍数章含 innovation；只认空标记 size=0）' -f $required.Count)
+
+$nnnOut = $nnn
+Write-Output ('【check-done】项目={0} 章节=第{1}章' -f $ProjectPath, $nnnOut)
+$chapterReqTxt = 'required'
+if ($NoChapterDone) { $chapterReqTxt = 'skipped' }
+$reportModeTxt = 'hard'
+if ($SoftReport) { $reportModeTxt = 'soft' }
+Write-Output ('必需标记数：{0}（10 倍数章含 innovation；只认空标记 size=0；chapter={1}；报告={2}）' -f $required.Count, $chapterReqTxt, $reportModeTxt)
 if ($present.Count) { $presentText = $present -join ', ' } else { $presentText = '（无）' }
 if ($nonempty.Count) { $nonemptyText = $nonempty -join ', ' } else { $nonemptyText = '（无）' }
 if ($missing.Count) { $missingText = $missing -join ', ' } else { $missingText = '（无）' }
@@ -213,19 +275,17 @@ elseif ($chapterState -eq 'nonempty') {
 else {
     Write-Output 'chapter.done：不存在'
 }
-Write-Output ('报告软校验：{0}' -f $reportStatus)
+Write-Output ('报告校验：{0}（{1}）' -f $reportStatus, $reportModeTxt)
 if ($nameConflicts.Count) {
     Write-Output '⚠️ 章号命名冲突：'
     $nameConflicts | ForEach-Object { Write-Output ('  ' + $_) }
 }
 
 function Write-ReportMsgs {
+    param([string]$Prefix = '⚠️ 报告校验：')
     if ($reportMsgs.Count -eq 0) { return }
-    Write-Output '⚠️ 软校验警告：'
+    Write-Output $Prefix
     $reportMsgs | ForEach-Object { Write-Output ('  ' + $_) }
-    if ($StrictReport) {
-        Write-Output '（-StrictReport：报告软校验亦未通过）'
-    }
 }
 
 if (($missing.Count -gt 0) -or ($nonempty.Count -gt 0)) {
@@ -247,36 +307,37 @@ if (($missing.Count -gt 0) -or ($nonempty.Count -gt 0)) {
     if ($AllowNonEmpty) {
         Write-Output '⚠️ 已启用 -AllowNonEmpty（仅限用户调试；宿主/LLM 禁止用此开关宣称闭环）'
     }
-    Write-ReportMsgs
+    Write-ReportMsgs -Prefix '⚠️ 报告校验诊断：'
     Write-Output '下一步：主代理按漏步自愈矩阵补缺，或用户回复「补缺」/「写后」'
     exit 1
 }
 
-if ($IncludeChapterDone -and -not $hasChapter) {
+if (-not $NoChapterDone -and -not $hasChapter) {
     Write-Output ''
-    Write-Output '❌ 必需标记已齐，但缺有效 chapter.done（-IncludeChapterDone）'
-    Write-ReportMsgs
+    Write-Output '❌ 必需标记已齐，但缺有效 chapter.done（默认要求；中途检查用 -NoChapterDone）'
+    Write-ReportMsgs -Prefix '⚠️ 报告校验诊断：'
     exit 1
 }
 
-if ($StrictReport -and $reportMsgs.Count -gt 0) {
+$reportFail = ($reportMsgs.Count -gt 0) -and (-not $SoftReport)
+if ($reportFail) {
     Write-Output ''
-    Write-Output '❌ -StrictReport：报告软校验未通过：'
+    Write-Output '❌ 报告校验未通过（默认硬校验；仅调试可用 -SoftReport）：'
     $reportMsgs | ForEach-Object { Write-Output ('  ' + $_) }
     exit 1
 }
 
 Write-Output ''
-Write-Output ('✅ 第{0}章必需空 .done 已齐（允许称流水线闭环；朱雀目标仍以用户回传三态为准）' -f $nnn)
+Write-Output ('✅ 第{0}章必需空 .done 已齐（允许称流水线闭环；朱雀目标仍以用户回传三态为准）' -f $nnnOut)
 Write-Output '对外汇报硬约定：必须分列「流水线闭环」与「朱雀三态/待检测」；禁止只贴 .done 或本脚本 exit0 冒充检测通过'
 if ($AllowNonEmpty) {
     Write-Output '⚠️ 已启用 -AllowNonEmpty（仅限用户调试；宿主/LLM 禁止用此开关宣称闭环）'
 }
-if ($reportMsgs.Count) {
-    Write-Output '⚠️ 软校验警告（不阻断；可用 -StrictReport 将其视为失败）：'
+if ($SoftReport -and $reportMsgs.Count) {
+    Write-Output '⚠️ 报告校验警告（-SoftReport 不阻断；闭环宣称禁止使用本开关）：'
     $reportMsgs | ForEach-Object { Write-Output ('  ' + $_) }
 }
-if (-not $hasChapter) {
-    Write-Output '备注：chapter.done 尚未写入——若流水线尚未走到步骤4.4/章节档案，请继续执行；若已闭环请补写空 chapter.done'
+if ($NoChapterDone -and -not $hasChapter) {
+    Write-Output '⚠️ 已启用 -NoChapterDone（仅限流水线中途检查；闭环宣称必须含 chapter.done）'
 }
 exit 0

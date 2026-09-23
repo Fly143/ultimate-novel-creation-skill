@@ -219,14 +219,14 @@ if($LintLineRef){
 # ---------- ⑦ 写后顺序与 zhuque 门禁一致性（防多文件再次漂移）----------
 
 # 顺序权威 = modules/03_26_功能模块.md 步骤4（先朱雀 4.1b–4.1e → .done_zhuque → 再修复）。
-# 其余权威文件必须至少含一条「先朱雀」正向锚点，且不得把「先修复再朱雀」写成必做顺序。
+# 正向锚点用正则（允许「先/均先/无论…先」等同义表述）；错序检测看本行+上一行豁免窗。
 if($LintOrder){
   $orderFiles = @(
-    @{ Path='modules/03_26_功能模块.md'; AnyOf=@('先执行 4.1b','均先做 4.1b','先 4.1b–4.1e','先做 4.1b','先跑 4.1b','先执行 4.1b–4.1e') },
-    @{ Path='modules/00_强制执行协议.md'; AnyOf=@('先跑朱雀','先朱雀','顺序唯一权威') },
-    @{ Path='SKILL.md'; AnyOf=@('先跑朱雀','先 4.1b','先跑朱雀 4.1b–4.1e') },
-    @{ Path='system_prompt.md'; AnyOf=@('先朱雀','先执行朱雀','先朱雀 4.1b–4.1e') },
-    @{ Path='README.md'; AnyOf=@('先跑 4.1b','先写 zhuque','先朱雀','先 4.1b') }
+    @{ Path='modules/03_26_功能模块.md'; Re='(先|均先).{0,8}(执行|做|跑)?.{0,4}4\.1b' },
+    @{ Path='modules/00_强制执行协议.md'; Re='(先|均先).{0,6}(跑|执行)?.{0,4}朱雀|顺序唯一权威|先\s*4\.1b' },
+    @{ Path='SKILL.md'; Re='(先|均先).{0,6}(跑|执行)?.{0,4}朱雀|先\s*4\.1b' },
+    @{ Path='system_prompt.md'; Re='(先|均先|无论).{0,8}(跑|执行)?.{0,6}朱雀|先\s*4\.1b|无论 PASS/FAIL，先' },
+    @{ Path='README.md'; Re='(先|均先).{0,6}(跑|写)?.{0,6}(4\.1b|朱雀)|先\s*zhuque' }
   )
   foreach($spec in $orderFiles){
     $fp = Join-Path $Root $spec.Path
@@ -235,18 +235,16 @@ if($LintOrder){
       continue
     }
     $text = [System.IO.File]::ReadAllText($fp, $enc)
-    $hit = $false
-    foreach($a in $spec.AnyOf){ if($text.Contains($a)){ $hit = $true; break } }
-    if(-not $hit){
-      $errors += "顺序一致性：$($spec.Path) 缺少「先朱雀/先 4.1b」正向锚点（任一：$($spec.AnyOf -join ' / ')）"
+    if(-not [regex]::IsMatch($text, $spec.Re)){
+      $errors += "顺序一致性：$($spec.Path) 缺少「先朱雀/先 4.1b」正向锚点（正则：$($spec.Re)）"
     }
     if($text -notmatch 'done_zhuque'){
       $errors += "顺序一致性：$($spec.Path) 未出现 done_zhuque（闭环门禁锚点缺失）"
     }
   }
-  # 禁止把错误顺序写成必做（「禁止/不得」语境豁免）
+  # 禁止把错误顺序写成必做（本行或上一行出现豁免词则放行）
   $wrongOrderRe = '(先修复再朱雀|修复\s*→\s*朱雀|修复\s*→\s*\.done_zhuque|修复后再(跑)?朱雀|修复，再(跑)?朱雀)'
-  $allowRe = '(禁止|不得|禁写|勿写|错误顺序|互斥|不要写成|不要写|禁止写成|不得写成|禁止把|不得把)'
+  $allowRe = '(禁止|不得|禁写|勿写|错误顺序|互斥|不要写成|不要写|禁止写成|不得写成|禁止把|不得把|严禁|非|勿)'
   $orderHits = @()
   Get-ChildItem -Recurse -File $Root -Filter *.md | ForEach-Object {
     $rel = $_.FullName.Substring($Root.Length+1) -replace '\\','/'
@@ -257,8 +255,12 @@ if($LintOrder){
       $ln = $lines[$i]
       if($ln -match '^\s*(```|~~~)'){ $inFence = -not $inFence; continue }
       if($inFence){ continue }
-      if($ln -match $wrongOrderRe -and $ln -notmatch $allowRe){
-        $orderHits += "$rel :$($i+1) 疑似写成「先修复后朱雀」必做顺序"
+      if($ln -match $wrongOrderRe){
+        $prev = ''
+        if($i -gt 0){ $prev = $lines[$i-1] }
+        if(($ln -notmatch $allowRe) -and ($prev -notmatch $allowRe)){
+          $orderHits += "$rel :$($i+1) 疑似写成「先修复后朱雀」必做顺序"
+        }
       }
     }
   }
@@ -279,9 +281,10 @@ if($LintOrder){
       $warns += "顺序一致性（警告）：$sf 建议说明纯 AI 全自动下「人工>疑似」不一定可达（需真人介入）"
     }
   }
-  # 可选工具脚本存在性 + 报告软校验能力文档提及
+  # 工具脚本存在性 + 默认硬校验/chapter 必需 文档提及
   $checkPs1 = Join-Path $Root 'scripts/check-done.ps1'
   $checkPy  = Join-Path $Root 'scripts/check-done.py'
+  $checkRules = Join-Path $Root 'scripts/check-done-rules.json'
   $docBlob = ''
   foreach($p in @('README.md','modules/00_强制执行协议.md','modules/03_26_功能模块.md','SKILL.md')){
     $fp = Join-Path $Root $p
@@ -294,8 +297,14 @@ if($LintOrder){
     $errors += "顺序一致性：文档引用了 scripts/check-done.py 但文件不存在"
   }
   if((Test-Path -LiteralPath $checkPs1) -or (Test-Path -LiteralPath $checkPy)){
-    if($docBlob -notmatch '人工证据包' -or $docBlob -notmatch '(软校验|StrictReport|strict-report)'){
-      $warns += "顺序一致性（警告）：check-done 已存在，建议 README/00/SKILL 至少一处说明「人工证据包」报告软校验（StrictReport）"
+    if(-not (Test-Path -LiteralPath $checkRules)){
+      $errors += "顺序一致性：check-done 规则单源 scripts/check-done-rules.json 不存在"
+    }
+    if($docBlob -notmatch '人工证据包' -or $docBlob -notmatch '(硬校验|soft-report|SoftReport|默认硬)'){
+      $warns += "顺序一致性（警告）：check-done 已存在，建议 README/00/SKILL 至少一处说明「人工证据包」默认硬校验（--soft-report 仅调试）"
+    }
+    if($docBlob -notmatch '(chapter\.done|默认要求 chapter|no-chapter-done|NoChapterDone)'){
+      $warns += "顺序一致性（警告）：check-done 默认要求 chapter.done，建议 README/00/SKILL 提及"
     }
   }
 }

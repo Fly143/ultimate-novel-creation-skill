@@ -109,7 +109,7 @@
 > - 逐项检查（二）→ 修复子代理/主代理改写时的参考依据
 > - 验证阶段（四）→ 03_26 步骤4.3 修复后二次审核
 > - 对策详情见 `references/朱雀AIGC检测对策.md` 第十一节
-> - **`.done` 客观核验**：`scripts/check-done.ps1` / `scripts/check-done.py`（只认空标记 size=0，非空无效；报告「人工证据包」节**结构软校验**：标题 + 结构证据类别 ≥2 类且至少含一类强证据，须带段号/字数结构；禁止使用 `--allow-non-empty`/`-AllowNonEmpty`）
+> - **`.done` 客观核验**：`scripts/check-done.ps1` / `scripts/check-done.py`（规则单源 `scripts/check-done-rules.json`；只认空标记 size=0，非空无效；默认要求 `chapter.done`；报告「人工证据包」节**默认硬校验**：标题 + 结构证据类别 ≥2 类且至少含一类强证据，须带段号/字数结构 + 正文段号交叉；禁止使用 `--allow-non-empty`/`-AllowNonEmpty`/`--soft-report`/`--no-chapter-done` 做闭环宣称）
 
 ---
 

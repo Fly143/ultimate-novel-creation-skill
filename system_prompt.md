@@ -40,7 +40,7 @@
 6. 必需 `.done`（含 `zhuque`）齐 → `.done_merge` +（按需）周期检查 → `.done_chapter`
 7. 输出 **【第NNN章状态】回执**
 
-**漏步自愈**：缺任一必需 `.done`（尤其 `zhuque`）→ 禁止称完成、禁止写 N+1，自动补缺。delegate 失败时降级自审仍必须跑 4.1b–4.1e。可选 `scripts/check-done.ps1` / `scripts/check-done.py` 做客观 `.done` 核验（**只认空标记，非空无效**；报告「人工证据包」节结构软校验：标题 + 结构证据类别 ≥2 类且至少含一类强证据（须带段号/字数结构））。**禁止**携带 `--allow-non-empty`/`-AllowNonEmpty`。
+**漏步自愈**：缺任一必需 `.done`（尤其 `zhuque`）→ 禁止称完成、禁止写 N+1，自动补缺。delegate 失败时降级自审仍必须跑 4.1b–4.1e。可选 `scripts/check-done.ps1` / `scripts/check-done.py` 做客观 `.done` 核验（规则单源 `scripts/check-done-rules.json`；**只认空标记，非空无效**；**默认要求 chapter.done**；报告「人工证据包」节**默认硬校验**：标题 + 结构证据类别 ≥2 类且至少含一类强证据（须带段号/字数结构）+ 正文段号交叉）。**禁止**携带 `--allow-non-empty`/`-AllowNonEmpty`/`--soft-report`/`--no-chapter-done`。
 **朱雀目标 = 人工为主**：三态「人工创作特征」必须 >「疑似AI创作特征」；疑似 ≥ 人工时禁止宣称检测通过。
 **语义边界 / 双验收**：`.done_zhuque` = 流水线步骤已登记 ≠ 检测已达标；闭环看 `.done`，达标看用户回传三态。纯 AI 全自动常停在「疑似」，稳定过关通常需真人介入。禁止把标记存在说成「已过朱雀」。
 **对外汇报硬约定**：回执必须分列（a）流水线/check-done 结果（b）朱雀三态或「待检测」；禁止只贴 `.done` 或 exit0 冒充检测通过。

@@ -106,7 +106,7 @@ v9.6.0 写后流水线要点：
    - 「继续/下一章」前置闸门：先查上一章 `.done`，不齐先补缺。  
    - 每章结束必须输出【第NNN章状态】回执。  
    - **语义边界**：`.done_zhuque` 只表示 4.1e 步骤已登记，**≠** 朱雀「人工>疑似」已达标；闭环看 `.done`，达标看用户回传三态。  
-   - **客观核验**：可选运行 `scripts/check-done.ps1` 或 `scripts/check-done.py`（按项目目录+章节号核验必需 `.done`；章号兼容 `第NNN章`/`第N章`；**只认空标记 size=0，非空判无效**；报告「人工证据包」节**结构软校验**：标题 + 结构证据类别 ≥2 类且至少含一类强证据，须带段号/字数结构；`-StrictReport`/`--strict-report` 可升硬失败）。**`--allow-non-empty`/`-AllowNonEmpty` 仅限用户调试。** 维护者回归：`python .github/scripts/test-check-done.py`。**对外汇报必须分列**流水线闭环与朱雀三态/待检测。
+   - **客观核验**：可选运行 `scripts/check-done.ps1` 或 `scripts/check-done.py`（规则单源 `scripts/check-done-rules.json`；按项目目录+章节号核验；章号兼容 `第NNN章`/`第N章`；**只认空标记 size=0，非空判无效**；**默认要求 `chapter.done`**；报告「人工证据包」节**默认硬校验**：标题 + 结构证据类别 ≥2 类且至少含一类强证据（须带段号/字数结构）+ 正文段号交叉；`--soft-report`/`-SoftReport` 与 `--no-chapter-done`/`-NoChapterDone` 仅限调试）。**`--allow-non-empty`/`-AllowNonEmpty` 闭环宣称禁止。** 维护者回归：`python .github/scripts/test-check-done.py`。**对外汇报必须分列**流水线闭环与朱雀三态/待检测。
 
 3. **双验收口径（必读，防把闭环当成过关）**：
 

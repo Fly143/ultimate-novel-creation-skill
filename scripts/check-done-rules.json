@@ -1,0 +1,76 @@
+{
+  "base_marks": [
+    "wordcount",
+    "bible",
+    "summary",
+    "zhuque",
+    "gates",
+    "constraints",
+    "logic_causal",
+    "review",
+    "quality",
+    "coherence",
+    "rhythm",
+    "merge"
+  ],
+  "section_title": "人工证据包",
+  "min_hits": 2,
+  "require_strong": true,
+  "claim_para_pattern": "第\\s*(\\d+)\\s*段",
+  "body_globs": [
+    "正文/第{nnn}章_*.txt",
+    "正文/第{ch}章_*.txt"
+  ],
+  "evidence_rules": [
+    {
+      "name": "人工段-段号",
+      "pattern": "人工(?:段|注入)(?!不足|不够|未|没有|缺乏|缺失)[^\\n]{0,24}?第\\s*\\d+\\s*段",
+      "strong": true
+    },
+    {
+      "name": "人工段-字数",
+      "pattern": "人工(?:段|注入)(?!不足|不够|未|没有|缺乏|缺失)[^\\n]{0,24}?(?:约|合计|共|至少|超过|≥|>)\\s*\\d+\\s*字",
+      "strong": true
+    },
+    {
+      "name": "段落位置-段号",
+      "pattern": "段落位置[^\\n]{0,24}?第\\s*\\d+\\s*段",
+      "strong": true
+    },
+    {
+      "name": "人工段-≥300字",
+      "pattern": "人工(?:段|注入)(?!不足|不够|未|没有|缺乏|缺失)[^\\n]{0,24}?(?:≥|>)\\s*300\\s*字",
+      "strong": true
+    },
+    {
+      "name": "规模字数",
+      "pattern": "(?:合计|约|共|至少|超过)[^\\n]{0,6}\\d{3,}\\s*字",
+      "strong": false
+    },
+    {
+      "name": "规模-≥300字",
+      "pattern": "(?:≥|>)\\s*300\\s*字",
+      "strong": false
+    },
+    {
+      "name": "结构破坏",
+      "pattern": "结构破坏",
+      "strong": false
+    },
+    {
+      "name": "对话毛刺",
+      "pattern": "对话毛刺",
+      "strong": false
+    },
+    {
+      "name": "高疑似段",
+      "pattern": "高疑似段",
+      "strong": false
+    },
+    {
+      "name": "密度自查",
+      "pattern": "密度自查",
+      "strong": false
+    }
+  ]
+}

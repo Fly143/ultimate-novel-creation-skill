@@ -49,6 +49,7 @@ SECTION_TITLE: str = RULES["section_title"]
 MIN_HITS: int = int(RULES["min_hits"])
 REQUIRE_STRONG: bool = bool(RULES["require_strong"])
 CLAIM_PARA_RE: re.Pattern[str] = re.compile(RULES["claim_para_pattern"])
+STATE_MARK: dict = RULES.get("state_mark", {})
 BODY_GLOBS: list[str] = list(RULES["body_globs"])
 
 # 章节任务书结构门禁（P0-2）
@@ -380,6 +381,13 @@ def main() -> int:
 
     nnn = f"{chapter:03d}"
     required = required_marks(chapter)
+    # P0-3：存在 记忆系统/_state.json → 追加 state 标记（无 state 文件的存量项目不追加）
+    state_rel = STATE_MARK.get("state_file", "记忆系统/_state.json")
+    state_file = project / state_rel
+    state_on = bool(STATE_MARK.get("auto_when_state_file", True)) and state_file.is_file()
+    state_errs: list[str] = []
+    if state_on:
+        required = required + [str(STATE_MARK.get("name", "state"))]
     present: list[str] = []
     nonempty: list[str] = []
     missing: list[str] = []
@@ -431,6 +439,21 @@ def main() -> int:
     else:
         print("chapter.done：不存在")
     print(f"报告校验：{report_status}（{report_mode}）")
+    if state_on and STATE_MARK.get("require_last_committed", True):
+        try:
+            with state_file.open(encoding="utf-8") as fh:
+                _st = json.load(fh)
+            _last = _st.get("last_committed_chapter")
+            if not isinstance(_last, int):
+                state_errs.append(f"状态单校验：last_committed_chapter 不是整数 → {state_file}")
+            elif _last < chapter:
+                state_errs.append(
+                    f"状态单落后：last_committed_chapter={_last} < 第{chapter}章"
+                    f"（先 state_commit commit --chapter {chapter} 再闭环）"
+                )
+        except (OSError, json.JSONDecodeError) as exc:
+            state_errs.append(f"状态单校验：无法读取 {state_file}：{exc}")
+    print(f"状态单：{'required（' + state_rel + ' 存在）' if state_on else 'skipped（无 _state.json，走旧路径）'}")
     if args.require_task_sheet:
         task_status, task_errs = check_task_sheet(project, nnn, chapter)
         print(f"任务书校验：{task_status}（require-task-sheet）")
@@ -457,6 +480,11 @@ def main() -> int:
                 f"❌ 未闭环：{len(nonempty)} 项标记非空（标准=size0）：{', '.join(nonempty)}"
             )
             print("修复：清空对应 .done 文件内容（保留文件名），或删除后重写")
+        if state_on and str(STATE_MARK.get("name", "state")) in missing:
+            print(
+                "提示：缺 state → 须先跑 scripts/state_commit.py commit --chapter N"
+                "（派生一致性用 state_commit check 核验）"
+            )
         if "zhuque" in missing:
             print(
                 "提示：缺 zhuque → 须补跑 03_26 4.1b–4.1e 人工证据包（见 modules/03_26_功能模块.md）"
@@ -480,6 +508,13 @@ def main() -> int:
         print()
         print("❌ 报告校验未通过（默认硬校验；仅调试可用 --soft-report）：")
         for m in report_msgs:
+            print(f"  {m}")
+        return 1
+
+    if state_errs:
+        print()
+        print("❌ 状态单校验未通过：")
+        for m in state_errs:
             print(f"  {m}")
         return 1
 

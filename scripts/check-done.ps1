@@ -83,6 +83,19 @@ foreach ($r in $rules.evidence_rules) {
 }
 $strongNames = @($evidenceRules | Where-Object { $_.Strong } | ForEach-Object { $_.Name })
 $taskSheetDirs = @($rules.task_sheet.dirs | ForEach-Object { [string]$_ })
+$stateMarkName = 'state'
+$stateRel = '记忆系统/_state.json'
+$stateRequireLast = $true
+if ($rules.state_mark) {
+    if ($rules.state_mark.name) { $stateMarkName = [string]$rules.state_mark.name }
+    if ($rules.state_mark.state_file) { $stateRel = [string]$rules.state_mark.state_file }
+    if ($null -ne $rules.state_mark.require_last_committed) { $stateRequireLast = [bool]$rules.state_mark.require_last_committed }
+}
+
+$stateFile = Join-Path $ProjectPath ($stateRel -replace '/', [string][char]92)
+$stateOn = (Test-Path -LiteralPath $stateFile)
+$stateErrs = @()
+if ($stateOn) { $required += $stateMarkName }
 $taskSheetSuffix = [string]$rules.task_sheet.suffix
 $taskSections = @($rules.task_sheet.required_sections | ForEach-Object { [string]$_ })
 $taskItemMark = [string]$rules.task_sheet.required_item_mark
@@ -332,6 +345,23 @@ else {
     Write-Output 'chapter.done：不存在'
 }
 Write-Output ('报告校验：{0}（{1}）' -f $reportStatus, $reportModeTxt)
+if ($stateOn -and $stateRequireLast) {
+    try {
+        $stObj = Get-Content -LiteralPath $stateFile -Raw -Encoding UTF8 | ConvertFrom-Json
+        $lastRaw = $stObj.last_committed_chapter
+        if ($null -eq $lastRaw -or -not ($lastRaw -is [int] -or $lastRaw -is [long])) {
+            $stateErrs += ('状态单校验：last_committed_chapter 不是整数 → {0}' -f $stateFile)
+        }
+        elseif ([int]$lastRaw -lt $Chapter) {
+            $stateErrs += ('状态单落后：last_committed_chapter={0} < 第{1}章（先 state_commit commit --chapter {1} 再闭环）' -f [int]$lastRaw, $Chapter)
+        }
+    }
+    catch {
+        $stateErrs += ('状态单校验：无法读取 {0}：{1}' -f $stateFile, $_.Exception.Message)
+    }
+}
+if ($stateOn) { Write-Output ('状态单：required（{0} 存在）' -f $stateRel) }
+else { Write-Output '状态单：skipped（无 _state.json，走旧路径）' }
 $taskStatus = 'skipped'
 $taskErrs = @()
 if ($RequireTaskSheet) {
@@ -361,6 +391,9 @@ if (($missing.Count -gt 0) -or ($nonempty.Count -gt 0)) {
         Write-Output ('❌ 未闭环：{0} 项标记非空（标准=size0）：{1}' -f $nonempty.Count, ($nonempty -join ', '))
         Write-Output '修复：清空对应 .done 文件内容（保留文件名），或删除后重写'
     }
+    if ($stateOn -and ($missing -contains $stateMarkName)) {
+        Write-Output ('提示：缺 {0} → 须先跑 scripts/state_commit.py commit --chapter N（派生一致性用 state_commit check 核验）' -f $stateMarkName)
+    }
     if ($missing -contains 'zhuque') {
         Write-Output '提示：缺 zhuque → 须补跑 03_26 4.1b–4.1e 人工证据包（见 modules/03_26_功能模块.md）'
     }
@@ -388,6 +421,13 @@ if ($reportFail) {
     Write-Output ''
     Write-Output '❌ 报告校验未通过（默认硬校验；仅调试可用 -SoftReport）：'
     $reportMsgs | ForEach-Object { Write-Output ('  ' + $_) }
+    exit 1
+}
+
+if ($stateErrs.Count -gt 0) {
+    Write-Output ''
+    Write-Output '❌ 状态单校验未通过：'
+    $stateErrs | ForEach-Object { Write-Output ('  ' + $_) }
     exit 1
 }
 

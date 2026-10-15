@@ -30,6 +30,7 @@ FLAG_MAP = {
     "--no-chapter-done": "-NoChapterDone",
     "--include-chapter-done": "-IncludeChapterDone",
     "--allow-non-empty": "-AllowNonEmpty",
+    "--require-task-sheet": "-RequireTaskSheet",
 }
 
 
@@ -127,6 +128,37 @@ def write_body(project: Path, chapter: int, paragraphs: int, pad: bool = True) -
         lines.append(f"这是第{i}段正文，用于交叉校验段号上限。")
         lines.append("")
     (d / f"第{nnn}章_测试章.txt").write_text("\n".join(lines), encoding="utf-8")
+
+
+def write_sheet(
+    project: Path,
+    chapter: int,
+    sections: tuple[str, ...] = ("TASK", "GOAL", "MUST DO", "CONTEXT"),
+    must_items: tuple[str, ...] = (),
+    pad: bool = True,
+) -> None:
+    """设定/细纲/第NNN章_细纲.md 任务书区块（P0-2 结构门禁 fixture；仓库真实约定路径）。"""
+    d = project / "设定" / "细纲"
+    d.mkdir(parents=True, exist_ok=True)
+    nnn = f"{chapter:03d}" if pad else str(chapter)
+    blocks = []
+    titles = {
+        "TASK": "TASK 本章任务",
+        "GOAL": "GOAL 原子目标",
+        "MUST DO": "MUST DO 必须完成",
+        "CONTEXT": "CONTEXT 信息索引",
+    }
+    for sec in ("TASK", "GOAL", "MUST DO", "CONTEXT"):
+        if sec not in sections:
+            continue
+        if sec == "MUST DO":
+            body = "\n".join(must_items) if must_items else "（无）"
+            blocks.append(f"### {titles[sec]}\n{body}")
+        else:
+            blocks.append(f"### {titles[sec]}\n内容占位")
+    (d / f"第{nnn}章_细纲.md").write_text(
+        "## 章节任务书\n\n" + "\n\n".join(blocks) + "\n", encoding="utf-8"
+    )
 
 
 BASE = [
@@ -445,6 +477,76 @@ def main() -> int:
             "soft-report 警告文案 → exit0",
             True,
             soft_report_warns,
+        )
+
+        # ===== P0-2 章节任务书结构门禁 =====
+        p8 = tmp_path / "p8"
+        empty_done(p8, 1, BASE)
+        write_report(p8, 1, GOOD_REPORT)
+        write_body(p8, 1, 10)
+
+        # 1) 缺任务书 → require 下 exit1
+        results += check_engines(
+            "任务书缺失 → require-task-sheet exit1",
+            True,
+            lambda e, p=p8: (
+                run(p, 1, "--require-task-sheet", engine=e)[0] == 1
+                and "任务书校验" in run(p, 1, "--require-task-sheet", engine=e)[1]
+            ),
+        )
+
+        # 2) 缺 CONTEXT 段 → exit1 并点名缺段
+        write_sheet(p8, 1, sections=("TASK", "GOAL", "MUST DO"))
+        results += check_engines(
+            "任务书缺 CONTEXT 段 → exit1 点名缺段",
+            True,
+            lambda e, p=p8: (
+                (lambda r: r[0] == 1 and "CONTEXT" in r[1])(
+                    run(p, 1, "--require-task-sheet", engine=e)
+                )
+            ),
+        )
+
+        # 3) 四段齐但无必落拍 → exit1
+        write_sheet(p8, 1)
+        results += check_engines(
+            "MUST DO 无必落拍 → exit1",
+            True,
+            lambda e, p=p8: (
+                (lambda r: r[0] == 1 and "必落" in r[1])(
+                    run(p, 1, "--require-task-sheet", engine=e)
+                )
+            ),
+        )
+
+        # 4) 必落拍未勾选 → exit1
+        write_sheet(p8, 1, must_items=("- [ ] 节拍1（必落）", "- [x] 节拍2（必落）"))
+        results += check_engines(
+            "必落拍未全勾 → exit1（漏拍判未完成）",
+            True,
+            lambda e, p=p8: (
+                (lambda r: r[0] == 1 and "漏必落拍" in r[1])(
+                    run(p, 1, "--require-task-sheet", engine=e)
+                )
+            ),
+        )
+
+        # 5) 全勾 → exit0
+        write_sheet(p8, 1, must_items=("- [x] 节拍1（必落）", "- [x] 节拍2（必落）"))
+        results += check_engines(
+            "任务书四段齐+必落拍全勾 → exit0",
+            True,
+            lambda e, p=p8: run(p, 1, "--require-task-sheet", engine=e)[0] == 0,
+        )
+
+        # 6) 不带 require（默认口径不变）→ 缺任务书仍 exit0
+        for rel in ("设定/细纲", "细纲"):
+            for f in (p8 / rel).glob("*_细纲.md"):
+                f.unlink()
+        results += check_engines(
+            "默认不带 require → 缺任务书仍 exit0（不回退既有口径）",
+            True,
+            lambda e, p=p8: run(p, 1, engine=e)[0] == 0,
         )
 
     ok_n = sum(results)

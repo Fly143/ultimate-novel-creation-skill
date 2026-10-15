@@ -17,6 +17,7 @@
   python scripts/check-done.py -p . -c 10 --no-chapter-done
   python scripts/check-done.py -p . -c 12 --soft-report
   python scripts/check-done.py -p . -c 12 --allow-non-empty
+  python scripts/check-done.py -p . -c 12 --require-task-sheet   # 写后闭环：校验细纲任务书四段+必落拍全勾
 
 退出码：0=必需空标记齐且默认硬校验通过；1=缺标记/非空/路径错误/硬校验失败。
 `--allow-non-empty`：仅限用户调试；宿主/LLM 禁止携带。
@@ -49,6 +50,13 @@ MIN_HITS: int = int(RULES["min_hits"])
 REQUIRE_STRONG: bool = bool(RULES["require_strong"])
 CLAIM_PARA_RE: re.Pattern[str] = re.compile(RULES["claim_para_pattern"])
 BODY_GLOBS: list[str] = list(RULES["body_globs"])
+
+# 章节任务书结构门禁（P0-2）
+TASK_SHEET: dict = RULES["task_sheet"]
+TASK_DIRS: list[str] = list(TASK_SHEET["dirs"])
+TASK_SUFFIX: str = TASK_SHEET["suffix"]
+TASK_SECTIONS: list[str] = list(TASK_SHEET["required_sections"])
+TASK_ITEM_MARK: str = TASK_SHEET["required_item_mark"]
 
 
 def required_marks(chapter: int) -> list[str]:
@@ -248,6 +256,71 @@ def check_report(
     return "ok", [], report_warns
 
 
+def check_task_sheet(
+    project: Path, nnn: str, chapter: int
+) -> tuple[str, list[str]]:
+    """章节任务书结构门禁（写后闭环用）。返回 (状态, 错误列表)。
+
+    状态：skipped（未启用）/ missing / no-section / no-item / unchecked / ok
+    规则：细纲/第NNN章_细纲.md 必须含四段（TASK/GOAL/MUST DO/CONTEXT）；
+    MUST DO 内至少 1 条带「（必落）」的清单项，且写后须全部勾选 [x]。
+    """
+    sheet_path = None
+    expected_parts: list[str] = []
+    for rel in TASK_DIRS:
+        sheet_dir = project / rel
+        found, _warns = resolve_existing(sheet_dir, nnn, chapter, TASK_SUFFIX)
+        expected_parts.extend(
+            str(sheet_dir / n) for n in _candidate_names(nnn, chapter, TASK_SUFFIX)
+        )
+        if found is not None and found.is_file():
+            sheet_path = found
+            break
+    if sheet_path is None:
+        return "missing", [
+            "任务书校验：缺章节任务书（写前应构造、写后必须存在）："
+            + " / ".join(expected_parts)
+        ]
+    text = sheet_path.read_text(encoding="utf-8", errors="replace")
+    lines = text.splitlines()
+    headings: dict[str, int] = {}
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        for sec in TASK_SECTIONS:
+            if stripped.startswith(f"### {sec}") and sec not in headings:
+                headings[sec] = i
+    missing_secs = [s for s in TASK_SECTIONS if s not in headings]
+    if missing_secs:
+        return "no-section", [
+            f"任务书校验：缺段 {', '.join(missing_secs)}"
+            f"（必需四段：{'/'.join(TASK_SECTIONS)}）→ {sheet_path}"
+        ]
+    # MUST DO 块范围：从其标题到下一个同级/更高级标题
+    start = headings["MUST DO"]
+    end = len(lines)
+    for i in range(start + 1, len(lines)):
+        if lines[i].strip().startswith("### "):
+            end = i
+            break
+    item_re = re.compile(r"^\s*-\s*\[([ xX])\][^\n]*" + re.escape(TASK_ITEM_MARK))
+    items: list[tuple[bool, str]] = []
+    for line in lines[start + 1 : end]:
+        m = item_re.match(line)
+        if m:
+            items.append((m.group(1).lower() == "x", line.strip()))
+    if not items:
+        return "no-item", [
+            f"MUST DO 缺「{TASK_ITEM_MARK}」节拍清单项（不允许边写边想）→ {sheet_path}"
+        ]
+    unchecked = [label for done, label in items if not done]
+    if unchecked:
+        return "unchecked", [
+            f"任务书校验：漏必落拍 {len(unchecked)}/{len(items)}（写后须全勾，否则本章判未完成）："
+            + "；".join(unchecked)
+        ]
+    return "ok", []
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="核验第 N 章写后流水线 .done 空标记")
     parser.add_argument("-p", "--project", required=True, help="项目（书名）目录")
@@ -276,6 +349,11 @@ def main() -> int:
         "--allow-non-empty",
         action="store_true",
         help="仅限用户本地调试：非空标记仍视为存在（宿主/LLM 闭环核验禁止使用）",
+    )
+    parser.add_argument(
+        "--require-task-sheet",
+        action="store_true",
+        help="写后闭环：校验细纲章节任务书四段齐全且必落拍全勾（缺则 exit1）",
     )
     args = parser.parse_args()
 
@@ -353,6 +431,11 @@ def main() -> int:
     else:
         print("chapter.done：不存在")
     print(f"报告校验：{report_status}（{report_mode}）")
+    if args.require_task_sheet:
+        task_status, task_errs = check_task_sheet(project, nnn, chapter)
+        print(f"任务书校验：{task_status}（require-task-sheet）")
+    else:
+        task_status, task_errs = "skipped", []
     if name_conflicts:
         print("⚠️ 章号命名冲突：")
         for m in name_conflicts:
@@ -398,6 +481,14 @@ def main() -> int:
         print("❌ 报告校验未通过（默认硬校验；仅调试可用 --soft-report）：")
         for m in report_msgs:
             print(f"  {m}")
+        return 1
+
+    if task_errs:
+        print()
+        print("❌ 任务书校验未通过（--require-task-sheet）：")
+        for m in task_errs:
+            print(f"  {m}")
+        print("修复：补写 细纲/第NNN章_细纲.md 任务书四段并勾选必落拍（模板见 templates/章节任务书模板.md）")
         return 1
 
     print()

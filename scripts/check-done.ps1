@@ -14,6 +14,7 @@
 #   powershell -File scripts/check-done.ps1 -Project <书名> -Chapter 12 -SoftReport
 #   powershell -File scripts/check-done.ps1 -Project <书名> -Chapter 12 -NoChapterDone
 #   powershell -File scripts/check-done.ps1 -Project <书名> -Chapter 12 -AllowNonEmpty
+#   powershell -File scripts/check-done.ps1 -Project <书名> -Chapter 12 -RequireTaskSheet
 # 退出码：0=必需空标记齐且默认硬校验通过；1=失败。
 # -AllowNonEmpty / -SoftReport / -NoChapterDone：闭环宣称禁止使用。
 # -StrictReport / -IncludeChapterDone：兼容别名（默认已生效）。
@@ -25,7 +26,8 @@ param(
     [switch]$StrictReport,
     [switch]$SoftReport,
     [switch]$NoChapterDone,
-    [switch]$AllowNonEmpty
+    [switch]$AllowNonEmpty,
+    [switch]$RequireTaskSheet
 )
 
 $enc = New-Object System.Text.UTF8Encoding($false)
@@ -80,6 +82,10 @@ foreach ($r in $rules.evidence_rules) {
     $evidenceRules += @{ Name = [string]$r.name; Pattern = [string]$r.pattern; Strong = [bool]$r.strong }
 }
 $strongNames = @($evidenceRules | Where-Object { $_.Strong } | ForEach-Object { $_.Name })
+$taskSheetDirs = @($rules.task_sheet.dirs | ForEach-Object { [string]$_ })
+$taskSheetSuffix = [string]$rules.task_sheet.suffix
+$taskSections = @($rules.task_sheet.required_sections | ForEach-Object { [string]$_ })
+$taskItemMark = [string]$rules.task_sheet.required_item_mark
 
 function Get-ChapterCandidates {
     param([string]$Nnn, [int]$Ch, [string]$Suffix)
@@ -160,6 +166,56 @@ function Find-BodyFile {
         if ($matches.Count -gt 0) { return $matches[0].FullName }
     }
     return $null
+}
+
+function Test-TaskSheet {
+    param([string]$ProjectRoot, [string]$Nnn, [int]$Ch)
+    $path = $null
+    $expectedParts = @()
+    foreach ($rel in $taskSheetDirs) {
+        $dir = Join-Path $ProjectRoot $rel
+        $resolved = Resolve-ChapterFile -BaseDir $dir -Nnn $Nnn -Ch $Ch -Suffix $taskSheetSuffix
+        foreach ($cand in $resolved.Candidates) { $expectedParts += (Join-Path $dir $cand) }
+        if ($null -ne $resolved.Path -and (Test-Path -LiteralPath $resolved.Path)) { $path = $resolved.Path; break }
+    }
+    if ($null -eq $path) {
+        return @{ Status = 'missing'; Errors = @(('任务书校验：缺章节任务书（写前应构造、写后必须存在）：{0}' -f ($expectedParts -join ' / '))) }
+    }
+    $text = [System.IO.File]::ReadAllText($path, $enc)
+    $lines = @($text -split "`r?`n")
+    $headings = @{}
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        $stripped = $lines[$i].Trim()
+        foreach ($sec in $taskSections) {
+            if (-not $headings.ContainsKey($sec) -and $stripped.StartsWith('### ' + $sec)) { $headings[$sec] = $i }
+        }
+    }
+    $missingSecs = @()
+    foreach ($sec in $taskSections) { if (-not $headings.ContainsKey($sec)) { $missingSecs += $sec } }
+    if ($missingSecs.Count -gt 0) {
+        $need = ($taskSections -join '/')
+        return @{ Status = 'no-section'; Errors = @(('任务书校验：缺段 {0}（必需四段：{1}）→ {2}' -f ($missingSecs -join ', '), $need, $path)) }
+    }
+    $start = [int]$headings['MUST DO']
+    $end = $lines.Count
+    for ($i = $start + 1; $i -lt $lines.Count; $i++) {
+        if ($lines[$i].Trim().StartsWith('### ')) { $end = $i; break }
+    }
+    $items = @()
+    for ($i = $start + 1; $i -lt $end; $i++) {
+        if ($lines[$i] -match ('^\s*-\s*\[([ xX])\][^\n]*' + [regex]::Escape($taskItemMark))) {
+            $isDone = ($Matches[1].ToLower() -eq 'x')
+            $items += @{ Done = $isDone; Label = $lines[$i].Trim() }
+        }
+    }
+    if ($items.Count -eq 0) {
+        return @{ Status = 'no-item'; Errors = @(('MUST DO 缺「{0}」节拍清单项（不允许边写边想）→ {1}' -f $taskItemMark, $path)) }
+    }
+    $unchecked = @($items | Where-Object { -not $_.Done } | ForEach-Object { $_.Label })
+    if ($unchecked.Count -gt 0) {
+        return @{ Status = 'unchecked'; Errors = @(('任务书校验：漏必落拍 {0}/{1}（写后须全勾，否则本章判未完成）：{2}' -f $unchecked.Count, $items.Count, ($unchecked -join '；'))) }
+    }
+    return @{ Status = 'ok'; Errors = @() }
 }
 
 $present = @()
@@ -276,6 +332,14 @@ else {
     Write-Output 'chapter.done：不存在'
 }
 Write-Output ('报告校验：{0}（{1}）' -f $reportStatus, $reportModeTxt)
+$taskStatus = 'skipped'
+$taskErrs = @()
+if ($RequireTaskSheet) {
+    $taskResult = Test-TaskSheet -ProjectRoot $ProjectPath -Nnn $nnn -Ch $Chapter
+    $taskStatus = $taskResult.Status
+    $taskErrs = @($taskResult.Errors)
+    Write-Output ('任务书校验：{0}（require-task-sheet）' -f $taskStatus)
+}
 if ($nameConflicts.Count) {
     Write-Output '⚠️ 章号命名冲突：'
     $nameConflicts | ForEach-Object { Write-Output ('  ' + $_) }
@@ -324,6 +388,14 @@ if ($reportFail) {
     Write-Output ''
     Write-Output '❌ 报告校验未通过（默认硬校验；仅调试可用 -SoftReport）：'
     $reportMsgs | ForEach-Object { Write-Output ('  ' + $_) }
+    exit 1
+}
+
+if ($taskErrs.Count -gt 0) {
+    Write-Output ''
+    Write-Output '❌ 任务书校验未通过（-RequireTaskSheet）：'
+    $taskErrs | ForEach-Object { Write-Output ('  ' + $_) }
+    Write-Output '修复：补写 细纲/第NNN章_细纲.md 任务书四段并勾选必落拍（模板见 templates/章节任务书模板.md）'
     exit 1
 }
 

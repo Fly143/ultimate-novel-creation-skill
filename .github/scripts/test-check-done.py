@@ -57,6 +57,18 @@ def run_py(project: Path, chapter: int, *extra: str) -> tuple[int, str]:
     return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
 
 
+def _decode(data: bytes | None) -> str:
+    """ps1 输出编码随控制台而变（Windows 中文环境默认 GBK，CI 为 UTF-8）→ 依次尝试，避免文案断言假红。"""
+    if not data:
+        return ""
+    for enc in ("utf-8", "gbk"):
+        try:
+            return data.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return data.decode("utf-8", errors="replace")
+
+
 def run_ps1(project: Path, chapter: int, *extra: str) -> tuple[int, str]:
     mapped = [FLAG_MAP[e] for e in extra]
     proc = subprocess.run(
@@ -72,12 +84,9 @@ def run_ps1(project: Path, chapter: int, *extra: str) -> tuple[int, str]:
             *mapped,
         ],
         capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
         env={**os.environ, "PYTHONIOENCODING": "utf-8"},
     )
-    return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
+    return proc.returncode, _decode(proc.stdout) + _decode(proc.stderr)
 
 
 def run(project: Path, chapter: int, *extra: str, engine: str = "py") -> tuple[int, str]:

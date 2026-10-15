@@ -275,7 +275,7 @@ v9.6.0 写后流水线要点：
 ├── modules/              # 31 个模块文件（28 功能模块 + 3 核心协议/规范 00/01/02）
 ├── references/           # 13+3 个精选写作参考（含 rulesets/ 规则集子目录）
 ├── templates/            # 16+3 个输出模板（含 constraints/ 约束模板子目录；含章节任务书模板）
-├── scripts/              # 指纹/词频统计（py/perl/pwsh 多实现同口径）+ 章节 .done 客观核验（check-done.py/ps1）+ 热路径文档预算守卫（doc-budget.json + check-doc-budget.py/ps1）+ 旧项目路径迁移
+├── scripts/              # 指纹/词频统计（py/perl/pwsh 多实现同口径）+ 章节 .done 客观核验（check-done.py/ps1）+ 状态单真源（state_commit.py/ps1 + state_render.py）+ 热路径文档预算守卫（doc-budget.json + check-doc-budget.py/ps1）+ 旧项目路径迁移
 ├── .github/              # 维护者工具：workflows/audit.yml + scripts/audit.ps1 + SMOKE_TEST.md + specs/（开发规格，不进 skill 运行时）
 └── memory-system/        # 记忆系统模板（skill 内只读，中英对照见 SKILL.md）
     ├── bible/            # 故事圣经 → 故事圣经/人物弧线/剧情时间线/伏笔清单/角色数据库
@@ -289,6 +289,7 @@ v9.6.0 写后流水线要点：
 ## 核心能力
 
 - **28 个功能模块**：项目初始化 → 世界观 → 人物 → 大纲 → 单章写作 → 爽点/冲突/对话/打斗 → 节奏诊断 → 质量检查 → 强约束系统 → 作品拆解分析 → 叙事质量管理 → 读者审稿 → 写后流水线 → 导入已有小说 → 导出发布 → 轻量直出（短文/推文旁路）
+- **状态单真源（新架构，可选）**：项目有 `记忆系统/_state.json` 时，圣经/摘要/上下文由 `state_commit` 脚本渲染（禁手改，`check` 逐字比对），`.done` 自动多一项 `state`；旧项目无该文件则一切照旧
 - **五层自然语言记忆系统**：故事圣经 / 人物弧线 / 剧情时间线 / 伏笔清单 / 角色数据库，LLM 直读直写，不依赖外部工具
 - **强约束系统**：金手指叙事约束 / 时间约束 / 多条叙事线监控，叙事参谋风格，不报违规只给建议
 - **叙事质量管理框架**：写前预检 / 写后三阶复核 / YAML参数链条存档 / 可替换规则集，全流程叙事品控

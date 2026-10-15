@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -94,6 +95,73 @@ def run(project: Path, chapter: int, *extra: str, engine: str = "py") -> tuple[i
     if engine == "ps1":
         return run_ps1(project, chapter, *extra)
     return run_py(project, chapter, *extra)
+
+
+def check_engines_case(name: str, ok: bool, fn) -> list[bool]:
+    """单实现（state_commit 引擎已在用例内循环）用例登记。"""
+    try:
+        cond = bool(fn())
+    except Exception as exc:  # noqa: BLE001
+        cond = False
+        detail = f"{type(exc).__name__}: {exc}"
+        print(f"  [FAIL] {name} — {detail}")
+        return [cond == ok]
+    print(f"  [{'PASS' if cond == ok else 'FAIL'}] {name}")
+    return [cond == ok]
+
+STATE_PY = ROOT / "scripts" / "state_commit.py"
+STATE_PS1 = ROOT / "scripts" / "state_commit.ps1"
+STATE_ENGINES = ["py", "ps1"] if PS_RUNNER else ["py"]
+
+
+def run_state(engine: str, command: str, *args: str) -> tuple[int, str]:
+    """调用 state_commit（命令与 flag 分离：py 用 --flag，ps1 用 -Command/-Flag）。"""
+    if engine == "ps1":
+        mapped: list[str] = ["-Command", command]
+        it = iter(args)
+        for a in it:
+            val = next(it, "")
+            flag = {"--project": "-Project", "--chapter": "-Chapter", "--input": "-InputFile"}.get(a, a)
+            mapped += [flag, val]
+        proc = subprocess.run(
+            [PS_RUNNER, "-NoProfile", "-File", str(STATE_PS1), *mapped],
+            capture_output=True,
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+        )
+        return proc.returncode, _decode(proc.stdout) + _decode(proc.stderr)
+    proc = subprocess.run(
+        [PY, str(STATE_PY), command, *args], capture_output=True,
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+    )
+    return proc.returncode, _decode(proc.stdout) + _decode(proc.stderr)
+
+
+def write_txn(project: Path, chapter: int, delta: dict) -> Path:
+    """draft 后填充 delta（两引擎共用：文件格式一致）。"""
+    txn = project / ".story" / "work" / f"第{chapter:03d}章" / "state.json"
+    txn.parent.mkdir(parents=True, exist_ok=True)
+    state = json.loads((project / "记忆系统" / "_state.json").read_text(encoding="utf-8"))
+    payload = {
+        "chapter": chapter,
+        "expected_state_revision": state.get("state_revision", 0),
+        "mode": "commit",
+        "delta": delta,
+    }
+    txn.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return txn
+
+
+def chapter_delta(chapter: int, who: str) -> dict:
+    return {
+        "characters": {who: {"snapshot": f"第{chapter}章后状态", "known_facts": [f"fact{chapter}"]}},
+        "facts": [{"chapter": chapter, "subject": who, "fact": f"事实{chapter}", "value": "v"}],
+        "timeline": {"readers_known": [{"chapter": chapter, "event": f"事件{chapter}"}], "authors_truth": []},
+        "summaries": {f"{chapter:03d}": f"第{chapter}章摘要内容。"},
+        "wordcounts": {f"{chapter:03d}": {"chars": 3000 + chapter, "target": 3000, "band_source": "default"}},
+        "foreshadow": {f"F{chapter:03d}": {"desc": f"线索{chapter}", "planted_ch": chapter,
+                                "planned_resolve_ch": chapter + 10, "resolved_ch": None, "priority": "高"}},
+        "context": {"position": {"chapter": chapter, "volume": "第一卷", "story_time": f"第{chapter}天"}},
+    }
 
 
 def empty_done(
@@ -548,6 +616,104 @@ def main() -> int:
             True,
             lambda e, p=p8: run(p, 1, engine=e)[0] == 0,
         )
+
+        # ===== P0-3 状态单真源（规格 §六 六条；state_commit 双引擎）=====
+        for engine in STATE_ENGINES:
+            proj = tmp_path / f"p_state_{engine}"
+            proj.mkdir()
+            code, _out = run_state(engine, "init", "--project", str(proj))
+            results.append(case(f"[state:{engine}] init → exit0", True, code == 0))
+            # 准备：ch1 提交成功
+            run_state(engine, "draft", "--project", str(proj), "--chapter", "1")
+            txn1 = write_txn(proj, 1, chapter_delta(1, "艾露"))
+            run_state(engine, "commit", "--project", str(proj), "--chapter", "1", "--input", str(txn1))
+
+            # 条目1：手改派生 → check FAIL 且点名文件
+            def tamper_check(e=engine, pr=proj):
+                tgt = pr / "记忆系统" / "圣经" / "事实台账.md"
+                tgt.write_text(tgt.read_text(encoding="utf-8") + "\n（手改）\n", encoding="utf-8")
+                code, out = run_state(e, "check", "--project", str(pr))
+                return code == 1 and "derived view differs from _state.json" in out and "事实台账.md" in out
+            results += check_engines_case(f"[state:{engine}] 手改派生 → check exit1 点名文件", True, tamper_check)
+            # 修复：用 state_render 重新渲染后再 check（派生须回到逐字一致）
+            def rerender_check(e=engine, pr=proj):
+                subprocess.run(
+                    [PY, str(ROOT / "scripts" / "state_render.py"), "--project", str(pr)],
+                    capture_output=True,
+                )
+                return run_state(e, "check", "--project", str(pr))[0] == 0
+            results += check_engines_case(f"[state:{engine}] 重渲染（state_render）后 check → exit0", True, rerender_check)
+
+            # 条目2：stale revision → 拒绝且事务保留
+            def stale_check(e=engine, pr=proj):
+                bad = pr / ".story" / "work" / "第009章" / "state.json"
+                bad.parent.mkdir(parents=True, exist_ok=True)
+                bad.write_text(json.dumps({"chapter": 9, "expected_state_revision": 0, "delta": {}},
+                                          ensure_ascii=False), encoding="utf-8")
+                code, out = run_state(e, "commit", "--project", str(pr), "--chapter", "9", "--input", str(bad))
+                return code == 1 and "stale transaction" in out and bad.exists()
+            results += check_engines_case(f"[state:{engine}] stale revision → commit 拒绝", True, stale_check)
+
+            # 条目5：连续两章 → 推进 + 派生刷新
+            def progress_check(e=engine, pr=proj):
+                run_state(e, "draft", "--project", str(pr), "--chapter", "2")
+                txn2 = write_txn(pr, 2, chapter_delta(2, "凯尔"))
+                code, _ = run_state(e, "commit", "--project", str(pr), "--chapter", "2", "--input", str(txn2))
+                st = json.loads((pr / "记忆系统" / "_state.json").read_text(encoding="utf-8"))
+                ledger = (pr / "记忆系统" / "圣经" / "事实台账.md").read_text(encoding="utf-8")
+                return (code == 0 and st["last_committed_chapter"] == 2 and st["state_revision"] == 2
+                        and len(st["facts"]) == 2 and "凯尔" in ledger
+                        and (pr / ".done" / "第002章_state.done").exists())
+            results += check_engines_case(f"[state:{engine}] 连续两章提交 → 推进且派生刷新", True, progress_check)
+
+            # 条目6：派生逐字一致（二次 check 仍 PASS）
+            results += check_engines_case(f"[state:{engine}] 二次 check 仍 PASS（逐字一致）", True,
+                                          lambda e=engine, pr=proj: run_state(e, "check", "--project", str(pr))[0] == 0)
+
+        # 条目3：commit 后 check-done 自动要求 state 标记（13 项）；缺则1，补齐则0
+        proj3 = tmp_path / "p_state_gate"
+        proj3.mkdir()
+        run_state("py", "init", "--project", str(proj3))
+        run_state("py", "draft", "--project", str(proj3), "--chapter", "1")
+        txn = write_txn(proj3, 1, chapter_delta(1, "艾露"))
+        run_state("py", "commit", "--project", str(proj3), "--chapter", "1", "--input", str(txn))
+        empty_done(proj3, 1, BASE)
+        write_report(proj3, 1, GOOD_REPORT)
+
+        def gate_missing(e):
+            (proj3 / ".done" / "第001章_state.done").unlink(missing_ok=True)  # commit 会自建，先删以测缺失路径
+            code, out = run(proj3, 1, engine=e)
+            return code == 1 and "缺 1 项必需 .done：state" in out and "状态单：required" in out
+        results += check_engines("check-done：缺 state 标记 → exit1（13 项口径）", True, gate_missing)
+
+        def gate_present(e):
+            (proj3 / ".done" / "第001章_state.done").write_bytes(b"")
+            code, out = run(proj3, 1, engine=e)
+            return code == 0 and "必需标记数：13" in out and "状态单：required" in out
+        results += check_engines("check-done：state 标记齐 + last_committed≥N → exit0", True, gate_present)
+
+        # 条目4：无 _state.json → 口径不变（12 项），向后兼容
+        proj4 = tmp_path / "p_state_legacy"
+        proj4.mkdir()
+        empty_done(proj4, 1, BASE)
+        write_report(proj4, 1, GOOD_REPORT)
+
+        def legacy_ok(e):
+            code, out = run(proj4, 1, engine=e)
+            return code == 0 and "必需标记数：12" in out and "状态单：skipped" in out
+        results += check_engines("check-done：无 _state.json → 维持 12 项（向后兼容）", True, legacy_ok)
+
+        # 跨引擎互通：py 写派生 → ps1 必须能校验（逐字一致）
+        if PS_RUNNER:
+            def cross_check():
+                run_state("py", "check", "--project", str(tmp_path / "p_state_py"))
+                code, out = run_state("ps1", "check", "--project", str(tmp_path / "p_state_py"))
+                return code == 0 and "逐字一致" in out
+            results.append(case("跨引擎互通：py 提交的项目 ps1 check PASS", True, cross_check()))
+            def cross_check2():
+                code, out = run_state("py", "check", "--project", str(tmp_path / "p_state_ps1"))
+                return code == 0 and "逐字一致" in out
+            results.append(case("跨引擎互通：ps1 提交的项目 py check PASS", True, cross_check2()))
 
     ok_n = sum(results)
     total = len(results)

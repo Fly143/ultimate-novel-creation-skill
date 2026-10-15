@@ -2,7 +2,7 @@
 # 全能小说作家 - CI 完整性审计脚本（GitHub Actions 调用）
 # 检查：①死引用 ②孤儿文件 ③版本号一致性(SKILL vs README徽章) ④残留英文路径token
 #      ⑤裸英文术语(警告) ⑥裸行号引用(警告) ⑦写后顺序与 zhuque 门禁一致性
-# 用法：pwsh .github/scripts/audit.ps1 -Root <仓库路径> [-StrictOrphan] [-LintTerm] [-LintLineRef] [-LintOrder]
+# 用法：pwsh .github/scripts/audit.ps1 -Root <仓库路径> [-StrictOrphan] [-LintTerm] [-LintLineRef] [-LintBudget] [-LintOrder]
 #   -StrictOrphan : 孤儿判定收紧为「必须存在指向该资产路径的引用」（默认关闭，便于渐进收紧）
 #   -LintTerm     : 额外检查裸英文术语 volume/phase/stage/summary（仅警告，不阻断）
 #   -LintLineRef  : 额外检查「第N行」式行号引用（仅警告，不阻断）
@@ -14,6 +14,7 @@ param(
     [switch]$StrictOrphan,
     [switch]$LintTerm,
     [switch]$LintLineRef,
+    [switch]$LintBudget,
     [bool]$LintOrder = $true
 )
 $enc = New-Object System.Text.UTF8Encoding($false)
@@ -309,6 +310,17 @@ if($LintOrder){
   }
 }
 
+# ---------- 文档预算（-LintBudget：热路径加载量守卫，规则单源 scripts/doc-budget.json） ----------
+if($LintBudget){
+  $budgetGuard = Join-Path (Join-Path $Root 'scripts') 'check-doc-budget.ps1'
+  if(-not (Test-Path -LiteralPath $budgetGuard)){
+    $errors += "文档预算：守卫脚本缺失 $budgetGuard"
+  } else {
+    & $budgetGuard -Root $Root
+    if($LASTEXITCODE -ne 0){ $errors += "文档预算：超出预算（明细见上；调整 doc-budget.json 必须写明 why 并同步基线）" }
+  }
+}
+
 # ---------- 汇总 ----------
 
 $warnGroups = 0
@@ -321,7 +333,8 @@ if($errors.Count){
 } else {
   $orphanNote = if($StrictOrphan){ "孤儿 0（收紧判定）" } else { "孤儿 0（兼容判定）" }
   $orderNote = if($LintOrder){ " / 写后顺序一致" } else { "" }
-  Write-Output "✅ 审计全部通过：死引用 0 / $orphanNote / 版本一致($skillVer) / 无残留英文路径$orderNote"
+  $budgetNote = if($LintBudget){ " / 文档预算 PASS" } else { "" }
+  Write-Output "✅ 审计全部通过：死引用 0 / $orphanNote / 版本一致($skillVer) / 无残留英文路径$orderNote$budgetNote"
   if($warns.Count){ Write-Output ""; Write-Output "⚠️ 警告 $warnGroups 组（不阻断）："; $warns | ForEach-Object { Write-Output $_ } }
   exit 0
 }

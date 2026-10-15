@@ -274,8 +274,8 @@ v9.6.0 写后流水线要点：
 ├── system_prompt.md      # 宿主 system prompt（强制 agent 遵守流程，使用前必配）
 ├── modules/              # 31 个模块文件（28 功能模块 + 3 核心协议/规范 00/01/02）
 ├── references/           # 13+3 个精选写作参考（含 rulesets/ 规则集子目录）
-├── templates/            # 15+3 个输出模板（含 constraints/ 约束模板子目录）
-├── scripts/              # 指纹/词频统计（py/perl/pwsh 多实现同口径）+ 章节 .done 客观核验（check-done.py/ps1）+ 旧项目路径迁移
+├── templates/            # 16+3 个输出模板（含 constraints/ 约束模板子目录；含章节任务书模板）
+├── scripts/              # 指纹/词频统计（py/perl/pwsh 多实现同口径）+ 章节 .done 客观核验（check-done.py/ps1）+ 热路径文档预算守卫（doc-budget.json + check-doc-budget.py/ps1）+ 旧项目路径迁移
 ├── .github/              # 维护者工具：workflows/audit.yml + scripts/audit.ps1 + SMOKE_TEST.md + specs/（开发规格，不进 skill 运行时）
 └── memory-system/        # 记忆系统模板（skill 内只读，中英对照见 SKILL.md）
     ├── bible/            # 故事圣经 → 故事圣经/人物弧线/剧情时间线/伏笔清单/角色数据库

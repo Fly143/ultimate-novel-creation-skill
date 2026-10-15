@@ -1,0 +1,123 @@
+{
+  "_comment": [
+    "热路径文档预算（P0-4）。度量 = 去掉所有空白后的字符数（中英文都算；改标点/换行不影响）。",
+    "文件条目支持 '路径#小节标题'（只计该小节：到下个同级/更高级标题为止；代码围栏里的 # 不算）。",
+    "paths[].branches = 互斥条件分支（取各分支和的最大值）；paths[].stacking = 同一次调用叠加的分支（最坏组合=全部相加）。",
+    "generated 条目由脚本产出，不手测（登记路径即可）；path_ceiling.exempt 内的 label 不参与上限判定但照常报数。",
+    "冷路径（安装/升级/模板说明）不登记、不受限。",
+    "度量单位=Unicode 码点数（Python len() / .NET 需减代理对；emoji 等非 BMP 字符记 1）。读取=UTF-8 字节解码剥 BOM + 换行归一化为 \\n。"
+  ],
+  "baseline": {
+    "measured_on": "2026-10-15",
+    "machine": "Windows 11 / pwsh 7.4.6",
+    "worst_path_chars": 40573,
+    "writer_delegated_chars": 19603,
+    "session_resident_chars": 24758,
+    "max_single_file": "modules/03_26_功能模块.md=21207"
+  },
+  "files": [
+    {
+      "path": "SKILL.md",
+      "budget": 3100,
+      "why": "技能入口：触发词与加载顺序"
+    },
+    {
+      "path": "system_prompt.md",
+      "budget": 5550,
+      "why": "宿主接入模板（仅 API 接入场景加载）"
+    },
+    {
+      "path": "modules/00_强制执行协议.md",
+      "budget": 10850,
+      "why": "协议权威：意图路由/检查点/命令表"
+    },
+    {
+      "path": "modules/02_功能模块索引.md",
+      "budget": 7100,
+      "why": "功能编号→模块映射"
+    },
+    {
+      "path": "modules/03_04_功能模块.md",
+      "budget": 4150,
+      "why": "情节大纲与分卷规划"
+    },
+    {
+      "path": "modules/03_06_功能模块.md",
+      "budget": 8600,
+      "why": "单章写作（含任务书步骤2.6）"
+    },
+    {
+      "path": "modules/03_13_功能模块.md",
+      "budget": 4950,
+      "why": "章节质量检查（八维对齐落点）"
+    },
+    {
+      "path": "modules/03_24_功能模块.md",
+      "budget": 5400,
+      "why": "写前预检"
+    },
+    {
+      "path": "modules/03_26_功能模块.md",
+      "budget": 22700,
+      "why": "写后流水线（最大单文件）"
+    },
+    {
+      "path": "templates/单章结构模板.md",
+      "budget": 500,
+      "why": "事件流原则"
+    },
+    {
+      "path": "templates/章节任务书模板.md",
+      "budget": 1100,
+      "why": "P0-2 新增：任务书模板"
+    },
+    {
+      "path": "templates/朱雀去AI化检查清单.md",
+      "budget": 5000,
+      "why": "朱雀人工证据包协议"
+    }
+  ],
+  "paths": [
+    {
+      "label": "主会话常驻（入口+协议+索引）",
+      "files": [
+        "SKILL.md",
+        "system_prompt.md",
+        "modules/00_强制执行协议.md",
+        "modules/02_功能模块索引.md"
+      ]
+    },
+    {
+      "label": "写一章·写手委派",
+      "files": [
+        "modules/00_强制执行协议.md",
+        "modules/03_06_功能模块.md",
+        "templates/单章结构模板.md",
+        "templates/章节任务书模板.md"
+      ]
+    },
+    {
+      "label": "写一章·写后流水线（最坏路径）",
+      "files": [
+        "modules/00_强制执行协议.md",
+        "modules/03_26_功能模块.md",
+        "modules/03_13_功能模块.md",
+        "templates/朱雀去AI化检查清单.md"
+      ]
+    },
+    {
+      "label": "写前预检",
+      "files": [
+        "modules/00_强制执行协议.md",
+        "modules/03_24_功能模块.md",
+        "modules/03_04_功能模块.md"
+      ]
+    }
+  ],
+  "generated": [],
+  "path_ceiling": {
+    "limit": 45000,
+    "exempt": [],
+    "why": "最坏路径实测 40,573（写后流水线，03_26 单文件 21,207）；上限取 +10.8% 余量=45,000。oh-story 的 35K 对本 skill 写后路径过紧（缺口 5.6K），写手委派路径 19,603 与写前预检 18,978 天然低于 35K，故全局用 45,000、按文件级预算控增量：任何热路径文件+7% 余量即触红线。"
+  }
+}

@@ -715,6 +715,58 @@ def main() -> int:
                 return code == 0 and "逐字一致" in out
             results.append(case("跨引擎互通：ps1 提交的项目 py check PASS", True, cross_check2()))
 
+    # ---------------- AI 文本启发式检测（P1-8）----------------
+
+    DETECT_PY = ROOT / "scripts" / "detect_ai_text.py"
+    DETECT_PS1 = ROOT / "scripts" / "detect_ai_text.ps1"
+    _detect_dir = Path(tempfile.mkdtemp(prefix="detect-test-"))
+    _ai_txt = _detect_dir / "ai.txt"
+    _ai_txt.write_text(
+        ("在这个快节奏的时代，值得注意的是，AI 写作正不断发展。\n"
+         "他不仅加快了脚步，他不仅握紧了剑，他不仅看向了远方。\n"
+         "他不仅加快了脚步，他不仅握紧了剑，他不仅看向了远方。\n"
+         "综上所述，AI 写作值得我们深入探讨，全面提升写作效率，不断优化表达方式，有效提升内容质量。\n"
+         "众所周知，显而易见，写作能力的提升需要多维度的训练，需要全方位的积累，需要一体化的方案。\n"
+         "让我们一起砥砺前行，不负韶华！……（省略号很多）……\n") * 6,
+        encoding="utf-8",
+    )
+    _clean_txt = _detect_dir / "clean.txt"
+    _clean_txt.write_text(
+        ("夜色压着山脊。\n老陈把烟掐了。\n「走吧。」他说。\n风从谷口灌进来，带着湿土味。\n"
+         "他数了数背包里的压缩饼干，还有四块。\n够撑到垭口。\n远处有狼嚎，一声，又停了。\n「不是冲我们。」老陈说。\n"),
+        encoding="utf-8",
+    )
+
+    def _detect(engine: str, txt: Path):
+        if engine == "ps1":
+            cmd = [PS_RUNNER, "-NoProfile", "-File", str(DETECT_PS1), "-InputFile", str(txt)]
+        else:
+            cmd = [PY, str(DETECT_PY), "--input", str(txt)]
+        proc = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+        return proc.returncode, proc.stdout
+
+    for e in ("py", "ps1"):
+        _c, _o = _detect(e, _ai_txt)
+        _txt = _o.decode("utf-8", "replace")
+        results.append(case(f"[detect:{e}] AI 味样例 exit0 且含总命中行", True,
+                            _c == 0 and ("总命中：" in _txt)))
+        _c2, _o2 = _detect(e, _clean_txt)
+        _txt2 = _o2.decode("utf-8", "replace")
+        results.append(case(f"[detect:{e}] 干净样例 总命中=0 且声明不构成朱雀结论", True,
+                            _c2 == 0 and "总命中：0" in _txt2 and "不构成朱雀结论" in _txt2))
+    _cp, _op = _detect("py", _ai_txt)
+    _cs, _os = _detect("ps1", _ai_txt)
+    results.append(case("[detect] AI 味样例 py/ps1 输出逐字节一致", True, _cp == _cs and _op == _os))
+    _cp2, _op2 = _detect("py", _clean_txt)
+    _cs2, _os2 = _detect("ps1", _clean_txt)
+    results.append(case("[detect] 干净样例 py/ps1 输出逐字节一致", True, _cp2 == _cs2 and _op2 == _os2))
+    _p = subprocess.run([PY, str(DETECT_PY), "--input", str(_ai_txt), "--fail-over", "3"], capture_output=True)
+    _s = subprocess.run([PS_RUNNER, "-NoProfile", "-File", str(DETECT_PS1), "-InputFile", str(_ai_txt), "-FailOver", "3"], capture_output=True)
+    results.append(case("[detect] fail-over 3（命中≥3）→ 双实现 exit1", True, _p.returncode == 1 and _s.returncode == 1))
+    _p = subprocess.run([PY, str(DETECT_PY), "--input", str(_ai_txt), "--fail-over", "999"], capture_output=True)
+    _s = subprocess.run([PS_RUNNER, "-NoProfile", "-File", str(DETECT_PS1), "-InputFile", str(_ai_txt), "-FailOver", "999"], capture_output=True)
+    results.append(case("[detect] fail-over 999（不可达）→ 双实现 exit0", True, _p.returncode == 0 and _s.returncode == 0))
+
     ok_n = sum(results)
     total = len(results)
     print(f"\n结果：{ok_n}/{total} 通过")

@@ -101,7 +101,7 @@ if($StrictOrphan){
   $docRoots = @('README.md','LICENSE','.gitignore','SKILL.md','system_prompt.md')
   # 可解析资产清单（排除 .git）
   $allFiles = Get-ChildItem -Recurse -File $Root | ForEach-Object { $_.FullName.Substring($Root.Length+1) -replace '\\','/' }
-  $assetSet = @{}; foreach($a in $allFiles){ if(($a -notlike '.git/*') -and ($a -notlike '.github/plans/*')){ $assetSet[$a] = $true } }
+  $assetSet = @{}; foreach($a in $allFiles){ if(($a -notlike '.git/*') -and ($a -notlike '.github/plans/*') -and ($a -notlike '.agents/*')){ $assetSet[$a] = $true } }   # ADR/计划为过程记录，不按 skill 资产判孤儿
   # 引用前缀目录白名单（与 skill 资产目录一致）
   $strictDirs = @('modules','references','templates','memory-system','agents','scripts','templates/constraints','references/rulesets')
   $strictDirsCn = @('模块','参考资源','模板','圣经','摘要','阶段','卷','约束')
@@ -119,6 +119,7 @@ if($StrictOrphan){
   foreach($f in $files){
     if($docRoots -contains $f){ continue }
     if($f -like '.github/*'){ continue }        # 维护者工具，无需被 skill 内容引用
+    if($f -like '.agents/*'){ continue }        # ADR 为过程记录，不按资产判孤儿
     if($f -like 'modules/*'){ continue }        # 模块为主动加载入口，由 00 协议/索引引用
     if(-not $refs.ContainsKey($f)){ $orphans += $f }
   }
@@ -175,7 +176,7 @@ if($LintTerm){
   $termRe = '(?<![A-Za-z_/-])(volume|phase|stage|summaries)(?![A-Za-z_])'
   $termHits = @()
   Get-ChildItem -Recurse -File $Root -Filter *.md | ForEach-Object {
-    $rel = $_.FullName.Substring($Root.Length+1)
+    $rel = $_.FullName.Substring($Root.Length+1) -replace '\\','/'
     if($rel -like '.github/*'){ return }
     $lines = [System.IO.File]::ReadAllLines($_.FullName, $enc)
     $inFence = $false
@@ -199,7 +200,7 @@ if($LintLineRef){
   # 用「第 N 行」定位文档内容极易因增删行而失准（CI 无法发现）。改用节名/标题引用。
   $lineHits = @()
   Get-ChildItem -Recurse -File $Root -Filter *.md | ForEach-Object {
-    $rel = $_.FullName.Substring($Root.Length+1)
+    $rel = $_.FullName.Substring($Root.Length+1) -replace '\\','/'
     if($rel -like '.github/*'){ return }
     $lines = [System.IO.File]::ReadAllLines($_.FullName, $enc)
     $inFence = $false

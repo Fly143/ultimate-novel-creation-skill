@@ -847,6 +847,92 @@ def main() -> int:
     results.append(case("[pkg] zip 确定性（两次 sha 一致）且载荷含 SKILL.md、无 .github/.agents", True,
                         _h[0] == _h[1] and "SKILL.md" in _names and not any(n.startswith((".github", ".agents")) for n in _names)))
 
+    # ---------------- 摘要陈旧检测（OF-6 / P3-24）----------------
+
+    _st_dir = Path(tempfile.mkdtemp(prefix="stale-test-"))
+    _sp = _st_dir / "p_stale"
+    _sp.mkdir()
+    for _e in STATE_ENGINES:
+        run_state(_e, "init", "--project", str(_sp))
+        run_state(_e, "draft", "--project", str(_sp), "--chapter", "1")
+        write_txn(_sp, 1, chapter_delta(1, "艾露"))
+        run_state(_e, "commit", "--project", str(_sp), "--chapter", "1", "--input", str(_sp / ".story" / "work" / "第001章" / "state.json"))
+        break  # 引擎无关：任一引擎建一次即可
+    _stf = _sp / "记忆系统" / "_state.json"
+    _orig_state = _stf.read_text(encoding="utf-8")
+    _obj = json.loads(_orig_state)
+    _obj["summaries"].pop("001", None)
+    _stf.write_text(json.dumps(_obj, ensure_ascii=False, indent=2), encoding="utf-8")
+    _outs = {}
+    for _e in STATE_ENGINES:
+        _c, _o = run_state(_e, "check", "--project", str(_sp))
+        _outs[_e] = (_c, _o)
+        results.append(case(f"[stale:{_e}] 缺第001章摘要 → check 仍 exit0 且点名 stale", True,
+                            _c == 0 and "摘要陈旧（stale）：第001章" in _o))
+    results.append(case("[stale] 双实现 stale 警告输出逐字节一致", True,
+                        _outs[STATE_ENGINES[0]][1] == _outs[STATE_ENGINES[1]][1]))
+    _stf.write_text(_orig_state, encoding="utf-8")
+    _c, _o = run_state(STATE_ENGINES[0], "check", "--project", str(_sp))
+    results.append(case("[stale] 摘要补全后 → ✅摘要连续（stale=0）", True, "✅ 摘要连续（stale=0）" in _o))
+
+    # ---------------- 伏笔时间线可视化（MU-1 / P3-21）----------------
+
+    FS_PY = ROOT / "scripts" / "foreshadow_timeline.py"
+    FS_PS1 = ROOT / "scripts" / "foreshadow_timeline.ps1"
+    _fs_dir = Path(tempfile.mkdtemp(prefix="fs-test-"))
+
+    def _fs_run(engine: str, pj: Path):
+        if engine == "ps1":
+            cmd = [PS_RUNNER, "-NoProfile", "-File", str(FS_PS1), "-Project", str(pj)]
+        else:
+            cmd = [PY, str(FS_PY), "--project", str(pj)]
+        proc = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+        md = (pj / "记忆系统" / "圣经" / "伏笔时间线.md")
+        return proc.returncode, proc.stdout.decode("utf-8", "replace"), (md.read_text(encoding="utf-8") if md.exists() else "")
+
+    # 旧清单夹具
+    _old = _fs_dir / "old"
+    (_old / "记忆系统" / "圣经").mkdir(parents=True)
+    (_old / "正文").mkdir()
+    (_old / "正文" / "第045章_夜行.txt").write_text("x", encoding="utf-8")
+    (_old / "记忆系统" / "圣经" / "伏笔清单.md").write_text(
+        "# 伏笔清单\n## 伏笔清单\n| # | 伏笔 | 首现 | 状态 | 预期回收 | 原始文本 | 近况 | 关联 |\n"
+        "|---|------|------|------|---------|---|---|---|\n"
+        "| 1 | 祖传玉佩 | 第5章 | 🔘 已埋设 | 第20章 | [原文] | 有提及 | 主线 |\n"
+        "| 2 | 反派卧底 | 第10章 | ✅ 已回收 | 第40章 | | | 角色A |\n"
+        "| 3 | 沉睡预言 | 第12章 | ⏸️ 暂停 | 第90章 | | | 主线 |\n"
+        "| 1 | | 第 X 章 | 🔘 已埋设 | 第 Y 章 | | | |\n",
+        encoding="utf-8")
+    _r = {}
+    for _e in ("py", "ps1"):
+        _c, _o, _md = _fs_run(_e, _old)
+        _r[_e] = (_c, _o, _md)
+        results.append(case(f"[fs:{_e}] 旧清单源 → exit0 且产物含过期点名/mermaid", True,
+                            _c == 0 and "🚨 过期：#1 祖传玉佩" in _o and "```mermaid" in _md and "第 X 章" not in _md))
+    results.append(case("[fs] 旧清单源 py/ps1 stdout 与产物 md 双逐字节一致", True,
+                        _r["py"] == _r["ps1"]))
+    # 新架构 state 夹具
+    _new = _fs_dir / "new"
+    (_new / "记忆系统" / "圣经").mkdir(parents=True)
+    (_new / "正文").mkdir()
+    (_new / "正文" / "第060章_决战.txt").write_text("x", encoding="utf-8")
+    (_new / "记忆系统" / "_state.json").write_text(json.dumps({
+        "schema_version": 1, "state_revision": 7, "book_title": "测试书",
+        "last_committed_chapter": 60,
+        "foreshadow": {"F001": {"desc": "神秘玉佩·半块", "planted_ch": 3, "planned_resolve_ch": 30,
+                                "resolved_ch": None, "priority": "高"},
+                       "F002": {"desc": "师父的信", "planted_ch": 8, "planned_resolve_ch": 55,
+                                "resolved_ch": 50, "priority": "中"}},
+    }, ensure_ascii=False, indent=2), encoding="utf-8")
+    _r2 = {}
+    for _e in ("py", "ps1"):
+        _c, _o, _md = _fs_run(_e, _new)
+        _r2[_e] = (_c, _o, _md)
+        results.append(case(f"[fs:{_e}] state 源 → 数据源=state 且 F001 过期 30 章", True,
+                            _c == 0 and "源=state" in _o and "超期 30 章" in _o and "师父的信" in _md))
+    results.append(case("[fs] state 源 py/ps1 stdout 与产物 md 双逐字节一致", True,
+                        _r2["py"] == _r2["ps1"]))
+
     ok_n = sum(results)
     total = len(results)
     print(f"\n结果：{ok_n}/{total} 通过")

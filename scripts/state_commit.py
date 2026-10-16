@@ -338,6 +338,17 @@ def cmd_check(project: Path) -> int:
         print("修复：不要手改派生文件；改 state 后重跑 commit（或 state_render 重新渲染）")
         return 1
     print("✅ 派生视图与状态单逐字一致（check 二次运行仍应 PASS）")
+    # OF-6 摘要陈旧检测（警告不阻断：范围 1..last_committed，缺单章摘要即 stale）
+    _last = int(st.get("last_committed_chapter", 0) or 0)
+    _summ = st.get("summaries") or {}
+    _stale = [c for c in range(1, _last + 1) if f"{c:03d}" not in _summ]
+    if _stale:
+        _shown = "、".join(f"第{c:03d}章" for c in _stale[:10])
+        if len(_stale) > 10:
+            _shown += f"…（共 {len(_stale)} 章）"
+        print(f"⚠️ 摘要陈旧（stale）：{_shown} 缺单章摘要 → 上下文可能不完整（先补摘要再续写）")
+    else:
+        print("✅ 摘要连续（stale=0）")
     return 0
 
 

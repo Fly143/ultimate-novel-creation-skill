@@ -819,6 +819,34 @@ def main() -> int:
     results.append(case("[guard] verify-all（ch2 被改）双实现 exit1 且逐字节一致", True,
                         cA == 1 and cB == 1 and oA == oB and "不一致 1 章" in oA, _eA + _eB))
 
+    # ---------------- 技能发布包（P3-19）----------------
+
+    PKG_PY = ROOT / "scripts" / "package_skill.py"
+    PKG_PS1 = ROOT / "scripts" / "package_skill.ps1"
+    _pa = subprocess.run([PY, str(PKG_PY), "--check"], capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+    _pb = subprocess.run([PS_RUNNER, "-NoProfile", "-File", str(PKG_PS1), "-Check"], capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+    results.append(case("[pkg] --check/-Check 双实现 exit0 且输出逐字节一致", True,
+                        _pa.returncode == 0 and _pb.returncode == 0 and _pa.stdout == _pb.stdout))
+    _pkg_dir = Path(tempfile.mkdtemp(prefix="pkg-test-"))
+    (_pkg_dir / "modules").mkdir()
+    (_pkg_dir / "SKILL.md").write_text("---\nname: demo\ndescription: 测试\n---\n# demo\n", encoding="utf-8")
+    _na = subprocess.run([PY, str(PKG_PY), "--check", "--root", str(_pkg_dir)], capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+    _nb = subprocess.run([PS_RUNNER, "-NoProfile", "-File", str(PKG_PS1), "-Check", "-Root", str(_pkg_dir)], capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+    _ta = (_na.stdout + _na.stderr).decode("utf-8", "replace")
+    _tb = (_nb.stdout + _nb.stderr).decode("utf-8", "replace")
+    results.append(case("[pkg] frontmatter 缺 version → 双实现 exit1 且输出一致", True,
+                        _na.returncode == 1 and _nb.returncode == 1 and _ta == _tb and "缺字段" in _ta and "version" in _ta))
+    import hashlib as _hashlib
+    import zipfile as _zipfile
+    _h = []
+    for _i in range(2):
+        _out = _pkg_dir / f"p{_i}.zip"
+        subprocess.run([PY, str(PKG_PY), "--out", str(_out), "--root", str(ROOT)], capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+        _h.append(_hashlib.sha256(_out.read_bytes()).hexdigest())
+    _names = _zipfile.ZipFile(_pkg_dir / "p0.zip").namelist()
+    results.append(case("[pkg] zip 确定性（两次 sha 一致）且载荷含 SKILL.md、无 .github/.agents", True,
+                        _h[0] == _h[1] and "SKILL.md" in _names and not any(n.startswith((".github", ".agents")) for n in _names)))
+
     ok_n = sum(results)
     total = len(results)
     print(f"\n结果：{ok_n}/{total} 通过")

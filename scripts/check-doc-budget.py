@@ -132,6 +132,16 @@ def main() -> int:
         else:
             print(f"  ✅ {ref} {n:,}/{budget:,}（余 {budget - n:,}）")
 
+    # 上下文分层（P3-18）：每个预算文件必须归类 protected/compressible
+    lc = {"protected": 0, "compressible": 0}
+    for item in rules.get("files", []):
+        layer = str(item.get("layer", ""))
+        if layer in lc:
+            lc[layer] += 1
+        else:
+            errors.append(f"分层缺失/非法：{item.get('path','?')} layer={layer}")
+    print(f"分层校验：protected {lc['protected']} / compressible {lc['compressible']}（压缩时只裁 compressible，protected 永不裁）")
+
     # 生成型条目
     for g in rules.get("generated", []):
         print(f"  ⚙ generated（脚本产出，不手测）：{g if isinstance(g, str) else json.dumps(g, ensure_ascii=False)}")

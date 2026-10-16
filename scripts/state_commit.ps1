@@ -526,7 +526,26 @@ switch ($Command) {
             exit 1
         }
         Write-Output '✅ 派生视图与状态单逐字一致（check 二次运行仍应 PASS）'
-        exit 0
+# OF-6 摘要陈旧检测（警告不阻断：范围 1..last_committed，缺单章摘要即 stale）
+$lastCh = 0
+if ($null -ne $st.PSObject.Properties['last_committed_chapter'] -and $st.last_committed_chapter) { $lastCh = [int]$st.last_committed_chapter }
+$summKeys = @{}
+if ($null -ne $st.PSObject.Properties['summaries'] -and $null -ne $st.summaries) {
+    foreach ($sp in $st.summaries.PSObject.Properties) { $summKeys[[string]$sp.Name] = $true }
+}
+$staleChs = @()
+for ($c = 1; $c -le $lastCh; $c++) { $kk = '{0:D3}' -f $c; if (-not $summKeys.ContainsKey($kk)) { $staleChs += $c } }
+if ($staleChs.Count -gt 0) {
+    $shownParts = @()
+    foreach ($c in ($staleChs | Select-Object -First 10)) { $shownParts += ('第{0:D3}章' -f $c) }
+    $shown = $shownParts -join '、'
+    if ($staleChs.Count -gt 10) { $shown += ('…（共 {0} 章）' -f $staleChs.Count) }
+    Write-Output ('⚠️ 摘要陈旧（stale）：{0} 缺单章摘要 → 上下文可能不完整（先补摘要再续写）' -f $shown)
+}
+else {
+    Write-Output '✅ 摘要连续（stale=0）'
+}
+        exit 00
     }
 
     'migrate' {

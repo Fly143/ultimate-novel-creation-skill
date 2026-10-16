@@ -1,0 +1,495 @@
+{
+  "package": "novel-skill-mechanism-port",
+  "created": "2026-10-15",
+  "target_repo": "https://github.com/Fly143/ultimate-novel-creation-skill",
+  "target_suggestion_branch": "feat/mechanism-port",
+  "source_projects": [
+    {
+      "id": "OH",
+      "name": "zenstory-ai/oh-story-claudecode",
+      "license": "MIT",
+      "note": "旧地址 worldwonderer/oh-story-claudecode 为同一仓库"
+    },
+    {
+      "id": "WN",
+      "name": "lingfengQAQ/webnovel-writer",
+      "license": "GPL-3.0-only",
+      "note": "v6=Claude Code 插件；v8=DSH Scriptor 插件"
+    },
+    {
+      "id": "IK",
+      "name": "Narcooo/inkos",
+      "license": "AGPL-3.0-only",
+      "note": "只借鉴方法论，不得复制代码"
+    },
+    {
+      "id": "AN",
+      "name": "ExplosiveCoderflome/AI-Novel-Writing-Assistant",
+      "license": "AGPL-3.0",
+      "note": "只借鉴方法论，不得复制代码"
+    },
+    {
+      "id": "OF",
+      "name": "syrizelink/OpenFic",
+      "license": "Apache-2.0"
+    },
+    {
+      "id": "MU",
+      "name": "xiamuceer-j/MuMuAINovel",
+      "license": "GPL-3.0",
+      "note": "仅 2 项可借"
+    }
+  ],
+  "constraints": [
+    "不引入宿主依赖：只用文件 + PowerShell/Python 脚本实现",
+    "不新开二级跳转：挂进既有权威文件（步骤权威=03_26，协议权威=00）",
+    "保持 py + ps1 双实现"
+  ],
+  "verification_commands": {
+    "regression": "python .github/scripts/test-check-done.py",
+    "audit": "pwsh .github/scripts/audit.ps1 -Root . -StrictOrphan -LintTerm -LintLineRef  # -LintOrder 默认 $true，禁裸传",
+    "budget": "pwsh scripts/check-doc-budget.ps1   # P0-4 落地后可用"
+  },
+  "tasks": [
+    {
+      "id": "P0-1",
+      "batch": "P0",
+      "title": "优先级裁决链",
+      "sources": [
+        "WN-1"
+      ],
+      "converges": true,
+      "targets": [
+        "modules/00_强制执行协议.md"
+      ],
+      "estimate": "2h",
+      "depends_on": [],
+      "acceptance": "构造冲突场景（用户要求跳过硬门禁），行为可复现且显式说明让位理由",
+      "status": "todo"
+    },
+    {
+      "id": "P0-2",
+      "batch": "P0",
+      "title": "章节任务书",
+      "sources": [
+        "IK-1",
+        "OF-3",
+        "OF-4",
+        "AN-2",
+        "WN-7",
+        "AN-7",
+        "WN-8"
+      ],
+      "converges": true,
+      "targets": [
+        "modules/03_06_功能模块.md",
+        "modules/00_强制执行协议.md",
+        "templates/",
+        "modules/03_26_功能模块.md",
+        "system_prompt.md",
+        "设定/[书名]_创作约定.md"
+      ],
+      "estimate": "1d",
+      "depends_on": [
+        "P1-5"
+      ],
+      "spec": "2026-10-15-规格-章节任务书.md",
+      "acceptance": "5 条回归用例全过（规格 §五）",
+      "status": "todo"
+    },
+    {
+      "id": "P0-3",
+      "batch": "P0",
+      "title": "状态单真源 + 派生视图",
+      "sources": [
+        "OH-1",
+        "IK-2",
+        "OH-3"
+      ],
+      "converges": true,
+      "targets": [
+        "memory-system/",
+        "scripts/state_commit.py",
+        "scripts/state_commit.ps1",
+        "scripts/state-render.py"
+      ],
+      "estimate": "2-3d",
+      "depends_on": [],
+      "spec": "2026-10-15-规格-状态单真源.md",
+      "acceptance": "6 条回归用例全过；手改派生文件 check 必须 FAIL",
+      "status": "todo"
+    },
+    {
+      "id": "P0-4",
+      "batch": "P0",
+      "title": "预算表 + 硬上限",
+      "sources": [
+        "OH-2",
+        "AN-4"
+      ],
+      "converges": false,
+      "targets": [
+        "scripts/doc-budget.json",
+        "scripts/check-doc-budget.ps1",
+        "scripts/check-doc-budget.py",
+        ".github/scripts/audit.ps1"
+      ],
+      "estimate": "0.5d",
+      "depends_on": [
+        "baseline-snapshot"
+      ],
+      "acceptance": "先出基线数据，再定各文件 budget；守卫 PASS",
+      "status": "todo"
+    },
+    {
+      "id": "P1-5",
+      "batch": "P1",
+      "title": "节拍层 + 逐拍核对 + 剧情单元切分法",
+      "sources": [
+        "OF-1",
+        "OF-2"
+      ],
+      "converges": false,
+      "targets": [
+        "templates/",
+        "modules/03_04_功能模块.md",
+        "modules/03_26_功能模块.md"
+      ],
+      "estimate": "1d",
+      "depends_on": [],
+      "note": "需本地化为章内节拍（OpenFic 不绑章节）",
+      "acceptance": "漏 [必落] 拍 → 本章判未完成",
+      "status": "todo"
+    },
+    {
+      "id": "P1-6",
+      "batch": "P1",
+      "title": "事实台账 + 时间线单一事实源",
+      "sources": [
+        "IK-2",
+        "WN-2"
+      ],
+      "converges": true,
+      "targets": [
+        "memory-system/bible/事实台账.md",
+        "templates/",
+        "modules/03_04_功能模块.md"
+      ],
+      "estimate": "1d",
+      "depends_on": [
+        "P0-3"
+      ],
+      "acceptance": "写前可查当前境界/谁已死；章纲时间字段与卷时间线一致",
+      "status": "todo"
+    },
+    {
+      "id": "P1-7",
+      "batch": "P1",
+      "title": "作者真相 / 读者已知 分离",
+      "sources": [
+        "OH-3"
+      ],
+      "converges": false,
+      "targets": [
+        "memory-system/",
+        "modules/00_强制执行协议.md"
+      ],
+      "estimate": "0.5d",
+      "depends_on": [
+        "P0-3"
+      ],
+      "acceptance": "角色提前知道未揭示信息 → 判定失败",
+      "status": "todo"
+    },
+    {
+      "id": "P1-8",
+      "batch": "P1",
+      "title": "AI 文本检测器（可量化）",
+      "sources": [
+        "OH-4"
+      ],
+      "converges": false,
+      "targets": [
+        "scripts/",
+        "modules/03_26_功能模块.md"
+      ],
+      "estimate": "1d",
+      "depends_on": [],
+      "note": "不得替代朱雀三态；0 命中不得冒充达标",
+      "acceptance": "命中数可追踪；与本 skill 既有词表打通（scripts/wordfreq.byte.pl + references/朱雀AIGC检测对策.md）",
+      "status": "todo"
+    },
+    {
+      "id": "P1-9",
+      "batch": "P1",
+      "title": "三区分治 + 事务化提交 + 续跑账本（含手改保护）",
+      "sources": [
+        "WN-3",
+        "WN-5",
+        "IK-5",
+        "IK-6"
+      ],
+      "converges": true,
+      "targets": [
+        "modules/01_文档存储规范.md",
+        "modules/03_26_功能模块.md"
+      ],
+      "estimate": "1.5d",
+      "depends_on": [
+        "P0-3"
+      ],
+      "acceptance": "覆盖手改 → 停下询问；提交原子性可验证",
+      "status": "todo"
+    },
+    {
+      "id": "P2-10",
+      "batch": "P2",
+      "title": "阶段化流程 + 确认门 + 确认点可编辑",
+      "sources": [
+        "AN-1",
+        "AN-2",
+        "OF-Phase0-5"
+      ],
+      "converges": true,
+      "targets": [
+        "modules/03_01_功能模块.md",
+        "modules/03_05_功能模块.md"
+      ],
+      "estimate": "2d",
+      "depends_on": [],
+      "acceptance": "阶段表完整；确认点编辑生效",
+      "status": "todo"
+    },
+    {
+      "id": "P2-11",
+      "batch": "P2",
+      "title": "主控三原则 + 作者裁决唯一门禁",
+      "sources": [
+        "WN-6"
+      ],
+      "converges": false,
+      "targets": [
+        "system_prompt.md",
+        "modules/00_强制执行协议.md"
+      ],
+      "estimate": "3h",
+      "depends_on": [],
+      "acceptance": "审查结论必须由脚本或作者产出，主控不得自行宣布通过",
+      "status": "todo"
+    },
+    {
+      "id": "P2-12",
+      "batch": "P2",
+      "title": "质检三连失败保留原稿",
+      "sources": [
+        "AN-3"
+      ],
+      "converges": true,
+      "targets": [
+        "modules/03_26_功能模块.md"
+      ],
+      "estimate": "0.5d",
+      "depends_on": [],
+      "acceptance": "修文超范围/复验失败 → 保留原稿并报告",
+      "status": "todo"
+    },
+    {
+      "id": "P2-13",
+      "batch": "P2",
+      "title": "多线未来推演（不污染正史）",
+      "sources": [
+        "IK-3"
+      ],
+      "converges": false,
+      "targets": [
+        "modules/03_04_功能模块.md"
+      ],
+      "estimate": "1d",
+      "depends_on": [],
+      "acceptance": "推演不修改正文/大纲/state；应用需显式确认",
+      "status": "todo"
+    },
+    {
+      "id": "P2-14",
+      "batch": "P2",
+      "title": "八维审读对齐 + 标题后置 + 格式硬数值",
+      "sources": [
+        "WN-9",
+        "OF-5",
+        "OF-7"
+      ],
+      "converges": false,
+      "targets": [
+        "modules/03_13_功能模块.md",
+        "modules/03_06_功能模块.md"
+      ],
+      "estimate": "1d",
+      "depends_on": [],
+      "acceptance": "维度表无缺口；标题无剧透/无连续雷同",
+      "status": "todo"
+    },
+    {
+      "id": "P2-15",
+      "batch": "P2",
+      "title": "ADR 制度",
+      "sources": [
+        "OH-5"
+      ],
+      "converges": false,
+      "targets": [
+        ".agents/notes/"
+      ],
+      "estimate": "0.5d",
+      "depends_on": [],
+      "acceptance": "至少补 3 篇 ADR；无 Validation 的规则不进主路径",
+      "status": "todo"
+    },
+    {
+      "id": "P2-16",
+      "batch": "P2",
+      "title": "多视角对抗审查 + 优雅降级",
+      "sources": [
+        "OH-6"
+      ],
+      "converges": false,
+      "targets": [
+        "modules/03_13_功能模块.md",
+        "modules/03_25_功能模块.md"
+      ],
+      "estimate": "1d",
+      "depends_on": [],
+      "acceptance": "full/lean/solo 三档；降级必须显式声明",
+      "status": "todo"
+    },
+    {
+      "id": "P3-17",
+      "batch": "P3",
+      "title": "断更无损恢复（进度从文件推导）",
+      "sources": [
+        "WN-4"
+      ],
+      "converges": false,
+      "targets": [
+        "modules/03_18_功能模块.md",
+        "进度看板.md"
+      ],
+      "estimate": "0.5d",
+      "depends_on": [],
+      "acceptance": "跨会话说“继续”即定位进度与待办",
+      "status": "todo"
+    },
+    {
+      "id": "P3-18",
+      "batch": "P3",
+      "title": "上下文分层 protected / compressible",
+      "sources": [
+        "IK-4"
+      ],
+      "converges": false,
+      "targets": [
+        "context-assembly-spec"
+      ],
+      "estimate": "0.5d",
+      "depends_on": [
+        "P0-4"
+      ],
+      "acceptance": "压缩时保护项不被裁掉",
+      "status": "todo"
+    },
+    {
+      "id": "P3-19",
+      "batch": "P3",
+      "title": "技能发布包（可被外部导入）",
+      "sources": [
+        "OF-8"
+      ],
+      "converges": false,
+      "targets": [
+        "docs/",
+        "scripts/"
+      ],
+      "estimate": "0.5d",
+      "depends_on": [],
+      "acceptance": "符合 agentskills.io 规范，可被 OpenFic 类系统导入",
+      "status": "todo"
+    },
+    {
+      "id": "P3-20",
+      "batch": "P3",
+      "title": "题材雷达 / 扫榜",
+      "sources": [
+        "AN",
+        "OH-7"
+      ],
+      "converges": false,
+      "targets": [
+        "独立模块"
+      ],
+      "estimate": "tbd",
+      "depends_on": [],
+      "note": "需联网 + 浏览器会话，违反无外部依赖约束；单独立项，不进主路径",
+      "status": "deferred"
+    }
+  ],
+  "open_questions": [
+    {
+      "id": 1,
+      "question": "章节任务书写在细纲头部还是独立文件",
+      "default": "细纲头部",
+      "affects": [
+        "P0-2"
+      ]
+    },
+    {
+      "id": 2,
+      "question": "状态单真源是否把阶段/卷压缩纳入 state 派生",
+      "default": "先纳入摘要与圣经，阶段/卷保持手写",
+      "affects": [
+        "P0-3"
+      ]
+    },
+    {
+      "id": 3,
+      "question": ".done 是否新增 state.done（12→13 项（口径 scripts/check-done-rules.json））",
+      "default": "是",
+      "affects": [
+        "P0-3"
+      ]
+    },
+    {
+      "id": 4,
+      "question": "预算上限是否用 35000 字符",
+      "default": "先出基线再定，改动须记录理由",
+      "affects": [
+        "P0-4"
+      ]
+    },
+    {
+      "id": 5,
+      "question": "检测器用 Node 还是 Python",
+      "default": "Python + PowerShell 双实现",
+      "affects": [
+        "P1-8"
+      ]
+    },
+    {
+      "id": 6,
+      "question": "是否做发布包（modules 镜像到 references）",
+      "default": "暂缓",
+      "affects": [
+        "P3-19"
+      ]
+    }
+  ],
+  "not_porting": [
+    "宿主 hooks / agents 部署（oh-story story-setup）",
+    "常驻服务形态（Express/Prisma/Qdrant；FastAPI/LangGraph/LanceDB）",
+    "多 skill 目录拆分（会打乱单入口路由权威链）",
+    "各项目的网文方法论正文（本 skill references 覆盖度更高）",
+    "Python 单实现（须保留 py+ps1 双实现）",
+    "LLM 自动批准（与作者裁决唯一门禁冲突）",
+    "Qdrant / 向量库 / 嵌入式模型",
+    "MuMu 的『大纲展开 ≤10 章/卷』"
+  ],
+  "verified_on": "2026-10-15 实测核对：6 个来源仓库逐条对证据 + 目标仓 origin/main(c660c65) 基线，见 2026-10-15-核查附录.md"
+}

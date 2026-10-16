@@ -116,6 +116,18 @@ foreach ($item in @($rules.files)) {
         Write-Output ("  ✅ {0} {1:N0}/{2:N0}（余 {3:N0}）" -f $ref, $n, $budget, ($budget - $n))
     }
 }
+# 上下文分层（P3-18）：每个预算文件必须归类 protected/compressible
+$layerProtected = 0
+$layerCompress = 0
+foreach ($item in @($rules.files)) {
+    $layer = ''
+    if ($null -ne $item.PSObject.Properties['layer']) { $layer = [string]$item.layer }
+    if ($layer -eq 'protected') { $layerProtected++ }
+    elseif ($layer -eq 'compressible') { $layerCompress++ }
+    else { $script:errors += ("分层缺失/非法：{0} layer={1}" -f $item.path, $layer) }
+}
+Write-Output ("分层校验：protected {0} / compressible {1}（压缩时只裁 compressible，protected 永不裁）" -f $layerProtected, $layerCompress)
+
 foreach ($g in @($rules.generated)) {
     Write-Output ("  ⚙ generated（脚本产出，不手测）：{0}" -f $g)
 }

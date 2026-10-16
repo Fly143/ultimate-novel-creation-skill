@@ -28,13 +28,14 @@ function Find-Body([string]$proj, [int]$ch) {
     $nnn = '{0:D3}' -f $ch
     foreach ($g in $globs) {
         $relPat = $g.Replace('{nnn}', $nnn).Replace('{ch}', "$ch")
-        $dir = Join-Path $proj (Split-Path $relPat -Parent)
+        $dirRel = (Split-Path $relPat -Parent).Replace('\', '/')
         $name = Split-Path $relPat -Leaf
+        $dir = Join-Path $proj $dirRel
         if (Test-Path -LiteralPath $dir) {
             $hits = @(Get-ChildItem -File -Path $dir -Filter $name | Sort-Object -Property Name)
             if ($hits.Count -gt 0) {
-                $rel = $hits[0].FullName.Substring((Resolve-Path -LiteralPath $proj).Path.Length).TrimStart('\', '/').Replace('\', '/')
-                return $rel
+                # 相对路径直拼（不靠前缀 Substring 反推，规避 CI 路径形态差异）
+                return "$dirRel/$($hits[0].Name)"
             }
         }
     }

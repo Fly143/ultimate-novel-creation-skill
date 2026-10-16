@@ -787,23 +787,24 @@ def main() -> int:
         else:
             cmd = [PY, str(GUARD_PY), command, "--project", str(pj), "--chapter", str(ch)]
         proc = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
-        return proc.returncode, proc.stdout.decode("utf-8", "replace")
+        err = proc.stderr.decode("utf-8", "replace").strip()
+        return proc.returncode, proc.stdout.decode("utf-8", "replace"), (f" | stderr: {err[:220]}" if err else "")
 
     for e in ("py", "ps1"):
         _pj = _mk_guard_proj(f"p_guard_{e}")
-        c1, o1 = _guard(e, "digest", _pj, 1)
-        results.append(case(f"[guard:{e}] digest ch1 exit0 且含指纹行", True, c1 == 0 and "【文本指纹】" in o1 and "已记录" in o1))
-        c2, o2 = _guard(e, "verify", _pj, 2)
-        results.append(case(f"[guard:{e}] verify 无记录 → exit2", True, c2 == 2 and "无指纹记录" in o2))
+        c1, o1, _e1 = _guard(e, "digest", _pj, 1)
+        results.append(case(f"[guard:{e}] digest ch1 exit0 且含指纹行", True, c1 == 0 and "【文本指纹】" in o1 and "已记录" in o1, _e1))
+        c2, o2, _e2 = _guard(e, "verify", _pj, 2)
+        results.append(case(f"[guard:{e}] verify 无记录 → exit2", True, c2 == 2 and "无指纹记录" in o2, _e2))
         _f = _pj / "正文" / "第001章_试炼.txt"
         _orig = _f.read_text(encoding="utf-8")
         _f.write_text(_orig + "（深夜又加了一句。）\n", encoding="utf-8")
-        c3, o3 = _guard(e, "verify", _pj, 1)
+        c3, o3, _e3 = _guard(e, "verify", _pj, 1)
         results.append(case(f"[guard:{e}] 手改后 verify → exit1 且给出处置口径", True,
-                            c3 == 1 and "与记录不一致" in o3 and "停下询问" in o3))
+                            c3 == 1 and "与记录不一致" in o3 and "停下询问" in o3, _e3))
         _f.write_text(_orig, encoding="utf-8")
-        c4, o4 = _guard(e, "verify", _pj, 1)
-        results.append(case(f"[guard:{e}] 还原后 verify → exit0", True, c4 == 0 and "一致" in o4))
+        c4, o4, _e4 = _guard(e, "verify", _pj, 1)
+        results.append(case(f"[guard:{e}] 还原后 verify → exit0", True, c4 == 0 and "一致" in o4, _e4))
         if e == "py":
             _o_py = (o1, o2, o3, o4)
         else:
@@ -813,10 +814,10 @@ def main() -> int:
     _pjA = _mk_guard_proj("p_guard_all")
     _guard("py", "digest", _pjA, 1); _guard("py", "digest", _pjA, 2)
     (_pjA / "正文" / "第002章_夜行.txt").write_text("风停了。\n", encoding="utf-8")
-    cA, oA = _guard("py", "verify-all", _pjA, 0)
-    cB, oB = _guard("ps1", "verify-all", _pjA, 0)
+    cA, oA, _eA = _guard("py", "verify-all", _pjA, 0)
+    cB, oB, _eB = _guard("ps1", "verify-all", _pjA, 0)
     results.append(case("[guard] verify-all（ch2 被改）双实现 exit1 且逐字节一致", True,
-                        cA == 1 and cB == 1 and oA == oB and "不一致 1 章" in oA))
+                        cA == 1 and cB == 1 and oA == oB and "不一致 1 章" in oA, _eA + _eB))
 
     ok_n = sum(results)
     total = len(results)

@@ -66,6 +66,7 @@ function Test-Cand([string]$cand, [string]$srcDir, [string]$label, [string]$line
 }
 Get-ChildItem -Recurse -File $Root -Filter *.md | ForEach-Object {
   $rel = $_.FullName.Substring($Root.Length+1) -replace '\\','/'
+  if($rel -like '.github/*'){ return }   # 方案/计划文档引用外部仓证据路径，不做死引用判定
   $parts = $rel -split '/'
   $srcDir = if($parts.Count -gt 1){ ($parts[0..($parts.Count-2)] -join '/') } else { '' }
   $lines = [System.IO.File]::ReadAllLines($_.FullName, $enc)
@@ -100,7 +101,7 @@ if($StrictOrphan){
   $docRoots = @('README.md','LICENSE','.gitignore','SKILL.md','system_prompt.md')
   # 可解析资产清单（排除 .git）
   $allFiles = Get-ChildItem -Recurse -File $Root | ForEach-Object { $_.FullName.Substring($Root.Length+1) -replace '\\','/' }
-  $assetSet = @{}; foreach($a in $allFiles){ if($a -notlike '.git/*'){ $assetSet[$a] = $true } }
+  $assetSet = @{}; foreach($a in $allFiles){ if(($a -notlike '.git/*') -and ($a -notlike '.github/plans/*')){ $assetSet[$a] = $true } }
   # 引用前缀目录白名单（与 skill 资产目录一致）
   $strictDirs = @('modules','references','templates','memory-system','agents','scripts','templates/constraints','references/rulesets')
   $strictDirsCn = @('模块','参考资源','模板','圣经','摘要','阶段','卷','约束')
@@ -155,7 +156,8 @@ elseif($skillVer -ne $readmeVer){ $errors += "版本号不一致：SKILL.md=$ski
 $forbidden = @('记忆系统/bible','记忆系统/summaries','记忆系统/phases','记忆系统/volumes','记忆系统/constraints','记忆系统/bible/')
 $tokens = @()
 Get-ChildItem -Recurse -File $Root -Filter *.md | ForEach-Object {
-  $rel = $_.FullName.Substring($Root.Length+1)
+  $rel = $_.FullName.Substring($Root.Length+1) -replace '\\','/'
+  if($rel -like '.github/*'){ return }   # 方案文档引用外部仓原文路径，不判残留
   $lines = [System.IO.File]::ReadAllLines($_.FullName, $enc)
   for($i=0;$i -lt $lines.Count;$i++){
     foreach($f in $forbidden){

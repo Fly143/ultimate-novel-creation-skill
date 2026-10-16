@@ -767,6 +767,57 @@ def main() -> int:
     _s = subprocess.run([PS_RUNNER, "-NoProfile", "-File", str(DETECT_PS1), "-InputFile", str(_ai_txt), "-FailOver", "999"], capture_output=True)
     results.append(case("[detect] fail-over 999（不可达）→ 双实现 exit0", True, _p.returncode == 0 and _s.returncode == 0))
 
+    # ---------------- 正文指纹/手改保护（P1-9）----------------
+
+    GUARD_PY = ROOT / "scripts" / "text_guard.py"
+    GUARD_PS1 = ROOT / "scripts" / "text_guard.ps1"
+    _gdir = Path(tempfile.mkdtemp(prefix="guard-test-"))
+
+    def _mk_guard_proj(name: str) -> Path:
+        pj = _gdir / name
+        (pj / "正文").mkdir(parents=True)
+        (pj / ".story").mkdir()
+        (pj / "正文" / "第001章_试炼.txt").write_text("夜色压着山脊。老陈把烟掐了。\n「走吧。」他说。\n", encoding="utf-8")
+        (pj / "正文" / "第002章_夜行.txt").write_text("风从谷口灌进来。他数了数饼干。\n", encoding="utf-8")
+        return pj
+
+    def _guard(engine: str, command: str, pj: Path, ch: int):
+        if engine == "ps1":
+            cmd = [PS_RUNNER, "-NoProfile", "-File", str(GUARD_PS1), "-Command", command, "-Project", str(pj), "-Chapter", str(ch)]
+        else:
+            cmd = [PY, str(GUARD_PY), command, "--project", str(pj), "--chapter", str(ch)]
+        proc = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+        return proc.returncode, proc.stdout.decode("utf-8", "replace")
+
+    for e in ("py", "ps1"):
+        _pj = _mk_guard_proj(f"p_guard_{e}")
+        c1, o1 = _guard(e, "digest", _pj, 1)
+        results.append(case(f"[guard:{e}] digest ch1 exit0 且含指纹行", True, c1 == 0 and "【文本指纹】" in o1 and "已记录" in o1))
+        c2, o2 = _guard(e, "verify", _pj, 2)
+        results.append(case(f"[guard:{e}] verify 无记录 → exit2", True, c2 == 2 and "无指纹记录" in o2))
+        _f = _pj / "正文" / "第001章_试炼.txt"
+        _orig = _f.read_text(encoding="utf-8")
+        _f.write_text(_orig + "（深夜又加了一句。）\n", encoding="utf-8")
+        c3, o3 = _guard(e, "verify", _pj, 1)
+        results.append(case(f"[guard:{e}] 手改后 verify → exit1 且给出处置口径", True,
+                            c3 == 1 and "与记录不一致" in o3 and "停下询问" in o3))
+        _f.write_text(_orig, encoding="utf-8")
+        c4, o4 = _guard(e, "verify", _pj, 1)
+        results.append(case(f"[guard:{e}] 还原后 verify → exit0", True, c4 == 0 and "一致" in o4))
+        if e == "py":
+            _o_py = (o1, o2, o3, o4)
+        else:
+            _o_ps1 = (o1, o2, o3, o4)
+    results.append(case("[guard] digest/verify 四场景 py/ps1 输出逐字节一致", True, _o_py == _o_ps1))
+    # verify-all：手改 ch2 → exit1
+    _pjA = _mk_guard_proj("p_guard_all")
+    _guard("py", "digest", _pjA, 1); _guard("py", "digest", _pjA, 2)
+    (_pjA / "正文" / "第002章_夜行.txt").write_text("风停了。\n", encoding="utf-8")
+    cA, oA = _guard("py", "verify-all", _pjA, 0)
+    cB, oB = _guard("ps1", "verify-all", _pjA, 0)
+    results.append(case("[guard] verify-all（ch2 被改）双实现 exit1 且逐字节一致", True,
+                        cA == 1 and cB == 1 and oA == oB and "不一致 1 章" in oA))
+
     ok_n = sum(results)
     total = len(results)
     print(f"\n结果：{ok_n}/{total} 通过")

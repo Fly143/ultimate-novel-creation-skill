@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import sys
 from pathlib import Path
@@ -33,8 +34,79 @@ def read_raw(root: Path, rel: str) -> str:
 
 
 def load_rules() -> dict:
-    with BUDGET_PATH.open(encoding="utf-8") as f:
-        return json.load(f)
+    if not BUDGET_PATH.is_file():
+        print(f"❌ 缺少规则单源：{BUDGET_PATH}")
+        raise SystemExit(1)
+    try:
+        with BUDGET_PATH.open(encoding="utf-8-sig") as f:
+            rules = json.load(f)
+    except json.JSONDecodeError as exc:
+        print(f"❌ 规则单源解析失败：{BUDGET_PATH}")
+        print(f"解析详情：{exc}", file=sys.stderr)
+        raise SystemExit(1)
+    if not isinstance(rules, dict):
+        print(f"❌ 规则单源解析失败：{BUDGET_PATH}（须为 JSON 对象）")
+        raise SystemExit(1)
+    return rules
+
+
+def validate_rules(rules: dict) -> list[str]:
+    """必填键 schema 校验（与 check-doc-budget.ps1 同清单同文案，fail-closed）。"""
+    errs: list[str] = []
+    if not isinstance(rules.get("files"), list):
+        errs.append("files 须为数组")
+    if not isinstance(rules.get("paths"), list):
+        errs.append("paths 须为数组")
+    if not isinstance(rules.get("path_ceiling"), dict):
+        errs.append("path_ceiling 须为对象")
+    files = rules.get("files")
+    if isinstance(files, list):
+        for i, item in enumerate(files):
+            if not isinstance(item, dict) or "path" not in item or "budget" not in item:
+                errs.append(f"files[{i}] 须为含 path/budget 的对象")
+                continue
+            if not isinstance(item["path"], str):
+                errs.append(f"files[{i}].path 须为字符串")
+            # 严格整数：float(10.9) 截断与 .NET 四舍五入会让双引擎按不同阈值裁决 → 必须类型判定
+            if not (isinstance(item["budget"], int) and not isinstance(item["budget"], bool)):
+                errs.append(f"files[{i}].budget 须为整数")
+    paths = rules.get("paths")
+    if isinstance(paths, list):
+        for i, item in enumerate(paths):
+            if not isinstance(item, dict) or "label" not in item or "files" not in item:
+                errs.append(f"paths[{i}] 须为含 label/files 的对象")
+                continue
+            for key in ("files", "branches", "stacking"):
+                if key not in item:
+                    continue
+                v = item[key]
+                if isinstance(v, str):
+                    continue
+                if isinstance(v, list) and all(
+                    isinstance(e, str)
+                    or (key != "files" and isinstance(e, list) and e and all(isinstance(x, str) for x in e))
+                    for e in v
+                ):
+                    continue
+                if key == "files":
+                    errs.append(f"paths[{i}].files 须为字符串或字符串数组")
+                else:
+                    errs.append(f"paths[{i}].{key} 组须为字符串或非空字符串数组")
+    gen = rules.get("generated")
+    if gen is not None and not (
+        isinstance(gen, str) or (isinstance(gen, list) and all(isinstance(e, str) for e in gen))
+    ):
+        errs.append("generated 须为字符串或字符串数组")
+    ceiling = rules.get("path_ceiling") if isinstance(rules.get("path_ceiling"), dict) else {}
+    ex = ceiling.get("exempt")
+    if ex is not None and not (
+        isinstance(ex, str) or (isinstance(ex, list) and all(isinstance(e, str) for e in ex))
+    ):
+        errs.append("exempt 须为字符串或字符串数组")
+    lim = ceiling.get("limit")
+    if not (isinstance(lim, int) and not isinstance(lim, bool)) or lim < 0:
+        errs.append("path_ceiling.limit 须为非负整数")
+    return errs
 
 
 def strip_ws(text: str) -> int:
@@ -73,9 +145,23 @@ def section_slice(text: str, title: str) -> str | None:
     return "\n".join(lines[start:])
 
 
+def _ref_list(refs) -> list:
+    """refs 归一为列表：单字符串简写 → 单元素（与 ps1 `@($Refs)` 同口径，禁止 list(str) 拆字符）。"""
+    if refs is None:
+        return []
+    if isinstance(refs, str):
+        return [refs]
+    return list(refs)
+
+
 def measure(root: Path, ref: str) -> tuple[int | None, str]:
     """ref = 'path' 或 'path#标题' → (字符数, 状态)。"""
+    if ref is None or not str(ref).strip():
+        return None, "空引用"
     rel, _, frag = ref.partition("#")
+    rel = rel.strip()
+    if not rel:
+        return None, f"空引用：{ref}"
     p = root / rel
     if not p.is_file():
         return None, f"缺文件 {rel}"
@@ -88,10 +174,12 @@ def measure(root: Path, ref: str) -> tuple[int | None, str]:
     return strip_ws(text), rel
 
 
-def sum_refs(root: Path, refs: list[str]) -> tuple[int, list[str]]:
+def sum_refs(root: Path, refs) -> tuple[int, list[str]]:
     total = 0
     problems: list[str] = []
-    for ref in refs:
+    for ref in _ref_list(refs):
+        if ref is None or not str(ref).strip():
+            continue  # 空引用跳过（与 ps1 Sum-Refs 同口径）
         n, status = measure(root, ref)
         if n is None:
             problems.append(status)
@@ -100,8 +188,17 @@ def sum_refs(root: Path, refs: list[str]) -> tuple[int, list[str]]:
     return total, problems
 
 
+class _ArgParser(argparse.ArgumentParser):
+    """退出码契约仅 0/1（与 check-done.py 同款）：用法错误也走 1。"""
+
+    def error(self, message: str):  # type: ignore[override]
+        self.print_usage(sys.stderr)
+        print(f"❌ 参数错误：{message}", file=sys.stderr)
+        raise SystemExit(1)
+
+
 def main() -> int:
-    ap = argparse.ArgumentParser(description="热路径文档预算守卫")
+    ap = _ArgParser(description="热路径文档预算守卫")
     ap.add_argument("--root", default=str(Path(__file__).resolve().parents[1]), help="仓库根")
     ap.add_argument("--print-baseline", action="store_true", help="额外打印基线汇总")
     args = ap.parse_args()
@@ -110,6 +207,10 @@ def main() -> int:
         print(f"❌ 缺少规则单源：{BUDGET_PATH}")
         return 1
     rules = load_rules()
+    schema_errs = validate_rules(rules)
+    if schema_errs:
+        print(f"❌ 规则单源校验失败：{BUDGET_PATH}（{'；'.join(schema_errs)}）")
+        return 1
     errors: list[str] = []
 
     print(f"【check-doc-budget】root={root}")
@@ -117,7 +218,6 @@ def main() -> int:
 
     # 文件级
     print("\n文件预算：")
-    measured: dict[str, int] = {}
     for item in rules.get("files", []):
         ref, budget = item["path"], int(item["budget"])
         n, status = measure(root, ref)
@@ -125,50 +225,69 @@ def main() -> int:
             errors.append(f"文件校验：{status}")
             print(f"  ❌ {ref} — {status}")
             continue
-        measured[ref] = n
         if n > budget:
-            errors.append(f"超预算：{ref} {n:,} > {budget:,}（{item.get('why','')}）")
+            _w = item.get("why", "")
+            _w = _w if isinstance(_w, str) else ""
+            errors.append(f"超预算：{ref} {n:,} > {budget:,}（{_w}）")
             print(f"  ❌ {ref} {n:,}/{budget:,} 超出 {n - budget:,} 字符")
+        elif budget > 0 and (budget - n) * 100 < budget * 5:
+            _pct = math.floor((budget - n) * 1000.0 / budget) / 10.0  # 向下取整到 0.1%，避免「5.0%<5%」矛盾
+            errors.append(f"余量<5%：{ref} {n:,}/{budget:,}（余 {budget - n:,}，{_pct:.1f}%）——删等量旧文本或扩预算写明 why（禁止静默放宽）")
+            print(f"  ❌ {ref} {n:,}/{budget:,} 余 {budget - n:,}（{_pct:.1f}%<5%）")
         else:
             print(f"  ✅ {ref} {n:,}/{budget:,}（余 {budget - n:,}）")
 
-    # 上下文分层（P3-18）：每个预算文件必须归类 protected/compressible
-    lc = {"protected": 0, "compressible": 0}
+    # 上下文分层（P3-18）：合法层名单单源 = context_layers 的键（排除 'why' 元字段）
+    layers_doc = rules.get("context_layers") or {}
+    valid_layers = [k for k in layers_doc if k != "why"] or ["protected", "compressible"]
+    lc = {k: 0 for k in valid_layers}
     for item in rules.get("files", []):
         layer = str(item.get("layer", ""))
         if layer in lc:
             lc[layer] += 1
         else:
             errors.append(f"分层缺失/非法：{item.get('path','?')} layer={layer}")
-    print(f"分层校验：protected {lc['protected']} / compressible {lc['compressible']}（压缩时只裁 compressible，protected 永不裁）")
+    _path_totals: dict = {}
+    _max_single: tuple = ("", -1)
+    for _item_m in rules.get("files", []):
+        _ref_m = _item_m.get("path")
+        if not isinstance(_ref_m, str):
+            continue
+        _n_m, _st_m = measure(root, _ref_m)
+        if _n_m is not None and _n_m > _max_single[1]:
+            _max_single = (_ref_m, _n_m)
+    _lparts = " / ".join(f"{k} {lc[k]}" for k in valid_layers)
+    print(f"分层校验：{_lparts}（压缩时只裁 compressible，protected 永不裁）")
 
-    # 生成型条目
-    for g in rules.get("generated", []):
+    # 生成型条目（键缺失/null 与 ps1 同口径：不输出）
+    for g in _ref_list(rules.get("generated")):
+        if g is None:
+            continue
         print(f"  ⚙ generated（脚本产出，不手测）：{g if isinstance(g, str) else json.dumps(g, ensure_ascii=False)}")
 
     # 路径级
     ceiling = rules.get("path_ceiling", {}) or {}
     limit = int(ceiling.get("limit", 0))
-    exempt = set(ceiling.get("exempt", []) or [])
+    exempt = set(_ref_list(ceiling.get("exempt", [])))
     print(f"\n路径合计（上限 path_ceiling.limit={limit:,}）：")
     worst = 0
     worst_label = ""
     for path in rules.get("paths", []):
         label = path["label"]
-        total, problems = sum_refs(root, list(path.get("files", [])))
+        total, problems = sum_refs(root, path.get("files", []))
         detail = [f"base={total:,}"]
-        for ref in path.get("branches", []) or []:
-            # branches = 多组互斥分支，每组是一串 ref
-            branch_totals = []
-            for grp in ref:
-                b, probs = sum_refs(root, list(grp))
-                errors.extend(f"{label} 分支：{p}" for p in probs)
-                branch_totals.append(b)
-            if branch_totals:
-                total += max(branch_totals)
-                detail.append(f"+branch(max)={max(branch_totals):,}")
-        for grp in path.get("stacking", []) or []:
-            s, probs = sum_refs(root, list(grp))
+        branch_totals = []
+        for branch in _ref_list(path.get("branches", []) or []):
+            # branches = 多组互斥分支，每组是一串 ref（组内求和）；组间取最大值（与 ps1 Sum-Refs 同语义）
+            # 字符串简写（branches="x.md" / 组内单串）由 _ref_list 归一，禁止 list(str) 拆字符
+            b, probs = sum_refs(root, branch)
+            errors.extend(f"{label} 分支：{p}" for p in probs)
+            branch_totals.append(b)
+        if branch_totals:
+            total += max(branch_totals)
+            detail.append(f"+branch(max)={max(branch_totals):,}")
+        for grp in _ref_list(path.get("stacking", []) or []):
+            s, probs = sum_refs(root, grp)
             errors.extend(f"{label} 叠加：{p}" for p in probs)
             total += s
             detail.append(f"+stack={s:,}")
@@ -180,10 +299,28 @@ def main() -> int:
             errors.append(f"路径超上限：{label} {total:,} > {limit:,}")
             flag = "❌"
         if label not in exempt:
+            _path_totals[label] = total
             if total > worst:
                 worst, worst_label = total, label
         print(f"  {flag} {label} {total:,}/{limit:,}（{' '.join(detail)}）")
 
+    # 基线防漂移闸：baseline 五字段须与实测一致（改文档后必须回填，禁止静默过期）
+    _bl = rules.get("baseline") or {}
+    if isinstance(_bl, dict) and _bl:
+        if isinstance(_bl.get("worst_path_chars"), int) and not isinstance(_bl.get("worst_path_chars"), bool) and _bl["worst_path_chars"] != worst:
+            errors.append(f"基线过期：baseline.worst_path_chars={_bl['worst_path_chars']:,} ≠ 实测 {worst:,}（改文档后回填 doc-budget.json baseline）")
+        for _lbl_b, _key_b in (("写一章·写手委派", "writer_delegated_chars"), ("主会话常驻（入口+协议+索引）", "session_resident_chars"), ("写前预检", "precheck_path_chars")):
+            _v_b = _bl.get(_key_b)
+            if isinstance(_v_b, int) and not isinstance(_v_b, bool) and _lbl_b in _path_totals and _v_b != _path_totals[_lbl_b]:
+                errors.append(f"基线过期：baseline.{_key_b}={_v_b:,} ≠ 实测 {_path_totals[_lbl_b]:,}（改文档后回填 doc-budget.json baseline）")
+        _msf_b = _bl.get("max_single_file")
+        if isinstance(_msf_b, str) and "=" in _msf_b:
+            _sp_b, _sn_b = _msf_b.rsplit("=", 1)
+            try:
+                if int(_sn_b) != _max_single[1]:
+                    errors.append(f"基线过期：baseline.max_single_file={_msf_b} ≠ 实测 {_max_single[0]}={_max_single[1]:,}（改文档后回填 doc-budget.json baseline）")
+            except ValueError:
+                errors.append(f"基线非法：baseline.max_single_file={_msf_b}（应为 path=整数）")
     print()
     if args.print_baseline:
         print(f"基线：最坏路径 {worst:,}（{worst_label}）/ 上限 {limit:,}")

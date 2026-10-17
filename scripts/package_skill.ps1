@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   package_skill.ps1 —— 技能发布包校验（P3-19）。
   -Check：校验 SKILL.md frontmatter（name/description/version）并打印载荷清单，
@@ -7,11 +7,15 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$Root = (Split-Path -Parent $PSScriptRoot),
+    [string]$Root,
     [switch]$Check
 )
+# $PSScriptRoot 在 Windows PowerShell 5.1 的 param 默认值里为 null → 挪到 param 之后求值（5.1/7 通用）
+if (-not $Root) { $Root = Split-Path -Parent $PSScriptRoot }
 $ErrorActionPreference = 'Stop'
 try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catch {}
+# py 口径 ws 全集（str.isspace/strip；.NET 默认 Trim 不含 U+001C-U+001F）
+$wsChars = [char[]]@(0x09,0x0a,0x0b,0x0c,0x0d,0x1c,0x1d,0x1e,0x1f,0x20,0x85,0xa0,0x1680,0x2000,0x2001,0x2002,0x2003,0x2004,0x2005,0x2006,0x2007,0x2008,0x2009,0x200a,0x2028,0x2029,0x202f,0x205f,0x3000)
 
 $includeDirs = @('modules', 'templates', 'references', 'scripts')
 $includeFiles = @('SKILL.md', 'system_prompt.md', 'LICENSE')
@@ -20,14 +24,14 @@ $required = @('name', 'description', 'version')
 $skillPath = Join-Path $Root 'SKILL.md'
 if (-not (Test-Path -LiteralPath $skillPath)) { [Console]::Out.WriteLine('❌ 缺少 SKILL.md'); exit 1 }
 $text = [System.IO.File]::ReadAllText($skillPath, [System.Text.Encoding]::UTF8)
-$fm = @{}
+$fm = New-Object 'System.Collections.Generic.Dictionary[string,string]' ([System.StringComparer]::Ordinal)
 if ($text.StartsWith('---')) {
     $end = $text.IndexOf("`n---", 3, [System.StringComparison]::Ordinal)
     if ($end -gt 0) {
-        foreach ($line in ($text.Substring(4, $end - 4) -split "`n")) {
-            if ($line -match '^[^\s].*?:' ) {
+        foreach ($line in ($text.Substring(4, $end - 4) -split '\r\n|\r|\v|\f|[\x1c-\x1e]|\x85|\u2028|\u2029|\n')) {
+            if ($line -match ':' -and $line -notmatch '^[ \t]') {  # 与 py frontmatter 同口径（仅排空格/Tab 首行，NBSP 等不排）
                 $i = $line.IndexOf(':')
-                $fm[$line.Substring(0, $i).Trim()] = $line.Substring($i + 1).Trim()
+                $fm[$line.Substring(0, $i).Trim($wsChars)] = $line.Substring($i + 1).Trim($wsChars)
             }
         }
     }
@@ -43,6 +47,8 @@ foreach ($d in $includeDirs) {
     if (-not (Test-Path -LiteralPath $base)) { continue }
     $rootFull = (Resolve-Path -LiteralPath $Root).Path
     foreach ($p in Get-ChildItem -Recurse -File -Path $base) {
+        # 与 py collect 同排除：__pycache__/*.pyc 不进载荷（读数随本机状态漂移）
+        if ($p.FullName -match '__pycache__' -or $p.Extension -eq '.pyc' -or $p.Extension -eq '.pyo') { continue }
         [void]$rels.Add($p.FullName.Substring($rootFull.Length).TrimStart('\', '/').Replace('\', '/'))
     }
 }

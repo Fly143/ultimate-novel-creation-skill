@@ -10,8 +10,8 @@
   - [C] 总体标准差/均值 <0.25（句数≥10）；[D] >60 单元句子占比 >40%（句数≥5）
   - [E] 每千单元：'…'>15 / '！'>30 / '——'>10
 用法：
-  python scripts/detect_ai_text.py --input 正文/第001章.md
-  python scripts/detect_ai_text.py -i 正文/第001章.md --extra-lexicon 词表.txt --fail-over 3
+  python scripts/detect_ai_text.py --input 正文/第001章_试炼.txt
+  python scripts/detect_ai_text.py -i 正文/第001章_试炼.txt --extra-lexicon 词表.txt --fail-over 3
 """
 import argparse
 import math
@@ -49,7 +49,10 @@ def main():
     ap.add_argument("--fail-over", type=int, default=0)
     a = ap.parse_args()
 
-    with open(a.input, encoding="utf-8") as f:
+    if not os.path.isfile(a.input):  # 与 ps1 Test-Path 同口径：缺文件同文案 exit1
+        print(f"❌ 文件不存在：{a.input}")
+        sys.exit(1)
+    with open(a.input, encoding="utf-8-sig") as f:  # 带 BOM 输入与 ps1 ReadAllText 剥 BOM 同口径（单元数/段落一致）
         text = f.read()
     text = text.replace("\r\n", "\n")
     units = len(text.encode("utf-16-le")) // 2

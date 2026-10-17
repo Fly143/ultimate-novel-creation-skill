@@ -4,13 +4,14 @@
 #       9.4.0+ 的中文路径规范，否则跨会话恢复（搜索 */记忆系统/圣经/故事圣经.md）找不到旧项目。
 #
 # 用法（在项目根目录运行，或指定 -TargetDir）：
-#   powershell -ExecutionPolicy Bypass -File migrate_memory_paths.ps1            # 预览（WhatIf）
+#   powershell -ExecutionPolicy Bypass -File migrate_memory_paths.ps1            # 预览（不带 -Apply）
 #   powershell -ExecutionPolicy Bypass -File migrate_memory_paths.ps1 -Apply     # 实际迁移
 #   powershell -ExecutionPolicy Bypass -File migrate_memory_paths.ps1 -TargetDir D:\我的小说 -Apply
 #
-# 特性：幂等（旧路径不存在则跳过，可重复运行）；-WhatIf 默认预览；输出完整操作日志。
+# 特性：幂等（旧路径不存在则跳过，可重复运行）；不带 -Apply 即预览（未启用 SupportsShouldProcess，传 -WhatIf 会报参数不存在）；输出完整操作日志。
 # ============================================================
 
+[CmdletBinding()]
 param(
     [string]$TargetDir = (Get-Location).Path,
     [switch]$Apply

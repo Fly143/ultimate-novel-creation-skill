@@ -8,10 +8,10 @@
 ```
 novel-skill-mechanism-port/
 ├── HANDOFF.md                    ← 本文件（先读这个）
-├── manifest.json                 ← 20 项任务的机器可读清单（可导入任务系统）
+├── manifest.json                 ← 23 项任务的机器可读清单（19 主清单 + 4 补录，status 已回填 completed，可导入任务系统）
 ├── README.md                     ← 文件索引 + 状态表
 ├── 2026-10-15-总案.md             ← 主文档：优先级、纪律、验收、不移植清单
-├── 2026-10-15-执行清单.md         ← 20 项可勾选清单（人读版）
+├── 2026-10-15-执行清单.md         ← 23 项可勾选清单（19 主清单 + 4 补录；人读版）
 ├── 2026-10-15-规格-章节任务书.md    ← P0-2 可实施规格（含模板 + 5 条回归）
 ├── 2026-10-15-规格-状态单真源.md    ← P0-3 可实施规格（含 schema + 6 条回归）
 └── 2026-10-15-来源-*.md ×6        ← 各项目机制清单（带证据引用）
@@ -35,14 +35,14 @@ git checkout -b feat/mechanism-port        # 建议开分支，逐项提交
 |---|---|---|
 | Python 3.8+ | `scripts/check-done.py`、新增的 `state_commit.py`、`check-doc-budget.py` | **必需**（本 skill 的 py 实现） |
 | Node.js | `check-ai-patterns.js` 类检测器（若按 P1-8 引入） | P1-8 时需要 |
-| PowerShell (pwsh) | `audit.ps1`、`check-done.ps1`、新增脚本的 ps1 实现 | **必装 pwsh ≥7**：两脚本为 UTF-8 无 BOM，Windows PowerShell 5.1 解析即错；本机实测无 pwsh → `winget install Microsoft.PowerShell`，或审计与双实现回归交 CI（`audit.yml`）跑 |
+| PowerShell (pwsh) | `audit.ps1`、`check-done.ps1`、新增脚本的 ps1 实现 | **建议装 pwsh ≥7**（2026-10-16 起仓库 `.ps1` 已全量补 UTF-8 BOM，Windows PowerShell 5.1 亦可直跑——5.1 实测 audit 全开关与回归均过；pwsh≥7 为推荐项）；本机无 pwsh → `winget install Microsoft.PowerShell`，或审计交 CI（`audit.yml`）跑 |
 
 自检命令：
 
 ```bash
-python -V                       # 期望 ≥3.8（本机实测 3.14.7；本机无 python3 命令）
+python -V                       # 期望 ≥3.8（版本随 PATH 而异，本机 3.11.16/3.14.7 并存；python3 无可用实现——WindowsApps 存根可被 which 命中但 rc=49 无输出）
 node -v                         # 期望 ≥16（P1-8 时需要）
-pwsh -v                         # 期望 ≥7（本机实测缺失，先装；否则审计只能交 CI）
+pwsh -v                         # 期望 ≥7（本机实测缺失，建议装；2026-10-16 起无 pwsh 时 5.1 亦可直跑，CI 兜底）
 ls modules modules/02_功能模块索引.md scripts/ .github/scripts/
 ```
 
@@ -50,8 +50,8 @@ ls modules modules/02_功能模块索引.md scripts/ .github/scripts/
 
 ```bash
 # 1) 现有门禁是否全绿（确认起点干净）
-python .github/scripts/test-check-done.py                # 期望全绿（54 项 = 27 用例 × py/ps1；无 pwsh 时仅 py 引擎 27 项）
-pwsh .github/scripts/audit.ps1 -Root . -StrictOrphan -LintTerm -LintLineRef   # -LintOrder 默认 $true，禁裸传
+python .github/scripts/test-check-done.py                # 期望全绿（2026-10-17 终态 330 项 = py/ps1 双引擎；无 pwsh 时 ps1 引擎由系统 PowerShell 5.1 承担——探测顺序 pwsh→powershell，仅当机器完全无 PowerShell 时才单跑 py）
+pwsh .github/scripts/audit.ps1 -Root . -StrictOrphan -LintTerm -LintLineRef   # -LintOrder 默认 $true，禁裸传；-File 形态勿传 $false（需关用 -Command）
 
 # 2) 记录现状指标（P0-4 需要基线数据）
 python - <<'PY'
@@ -89,7 +89,7 @@ P2/P3       按需，见总案总表
 9 更新 README.md
 ```
 
-**每条都要跑**：`pwsh .github/scripts/audit.ps1 -Root . -StrictOrphan -LintTerm -LintLineRef`（`-LintOrder` 默认开启；需显式关写 `-LintOrder $false`）
+**每条都要跑**：`pwsh .github/scripts/audit.ps1 -Root . -StrictOrphan -LintTerm -LintLineRef`（`-LintOrder` 默认开启；需显式关在 `-Command`/交互式下写 `-LintOrder $false`，`-File` 形态省略）
 
 ## 五、三条不可破的约束（违反即返工）
 
@@ -104,12 +104,14 @@ P2/P3       按需，见总案总表
 
 | # | 问题 | 建议默认 | 影响项 |
 |---|---|---|---|
-| 1 | 章节任务书写在**细纲头部**还是独立文件？ | 细纲头部（少一个索引登记） | P0-2 |
-| 2 | 状态单真源是否把「阶段/卷压缩」也纳入 state 派生？ | 先纳入摘要与圣经；阶段/卷保持现有手写（降低首期风险） | P0-3 |
-| 3 | `.done` 是否新增 `state.done`（12→13 项，口径 `scripts/check-done-rules.json`）？ | 是（否则状态提交无法纳入闭环校验） | P0-3 |
-| 4 | 预算上限是否直接用 oh-story 的 35000 字符？ | 先出基线，再定（可能需按本 skill 规模放宽，但必须显式记录理由） | P0-4 |
-| 5 | 检测器用 Node（照 oh-story）还是 Python（保持双实现）？ | Python + PowerShell 双实现，与现有脚本一致 | P1-8 |
-| 6 | 是否做"发布包"（modules 镜像到 references 以便被 OpenFic 类系统导入）？ | 暂缓，P3-19 按需 | P3-19 |
+| 1 | 章节任务书写在**细纲头部**还是独立文件？ | 细纲头部（少一个索引登记）**【已决：P0-2 落地，四段在细纲头部】** | P0-2 |
+| 2 | 状态单真源是否把「阶段/卷压缩」也纳入 state 派生？ | 先纳入摘要与圣经；阶段/卷保持现有手写（降低首期风险）**【已决：P0-3 按此落地】** | P0-3 |
+| 3 | `.done` 是否新增 `state.done`（12→13 项，口径 `scripts/check-done-rules.json`）？ | 是（否则状态提交无法纳入闭环校验）**【已决：已实现，13 项口径】** | P0-3 |
+| 4 | 预算上限是否直接用 oh-story 的 35000 字符？ | 先出基线，再定（可能需按本 skill 规模放宽，但必须显式记录理由）**【已决：2026-10-17 现值 48,500 = 实测 46,315 + 约4.7%（十五轮终态；十四轮 45,919、九轮 45,916、八轮 45,795、七轮 48,000/45,708、六轮 48,000/45,522、五轮 48,000/45,402、四轮 47,500/45,091、三轮 44,665、二轮 47,000/44,322），论证见 `scripts/doc-budget.json` path_ceiling.why 与实施记录§三 #1】** | P0-4 |
+| 5 | 检测器用 Node（照 oh-story）还是 Python（保持双实现）？ | Python + PowerShell 双实现，与现有脚本一致**【已决：P1-8 落地】** | P1-8 |
+| 6 | 是否做"发布包"（modules 镜像到 references 以便被 OpenFic 类系统导入）？ | 暂缓，P3-19 按需**【已决：P3-19 已做 -Check 双实现校验，zip 仅 py】** | P3-19 |
+
+> 状态：六问全部已决（2026-10-16）；机器可读副本 `manifest.json.open_questions` 已同步 status。
 
 ## 七、参考：每个来源文件里能查到什么
 
@@ -143,7 +145,7 @@ P2/P3       按需，见总案总表
 |---|---|
 | 手改派生记忆文件 | `check` 必须拒绝（0 容忍） |
 | 写一章的加载字符数 | 建立基线后设上限并强制 |
-| 写后闭环项 | 12 个必需标记 + `chapter`（+`innovation`）→ 13 项（含 `state.done`），全绿才算完成 |
+| 写后闭环项 | 必需标记 12 → 新架构 13 项（含 `state.done`）；`chapter.done` 另计（10 倍数章 +`innovation`）；全绿才算完成 |
 | 冲突行为 | 优先级链可复现，降级必显式声明 |
 | 规则膨胀 | 新规则须有 ADR + Validation |
 | 既有门禁 | `test-check-done.py` 全绿 + `audit.ps1` 全开关 PASS（**不得回退**） |

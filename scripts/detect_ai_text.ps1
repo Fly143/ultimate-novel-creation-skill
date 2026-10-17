@@ -1,10 +1,10 @@
-<#
+﻿<#
 .SYNOPSIS
   detect_ai_text.ps1 —— AI 文本启发式检测（本地辅助，P1-8）。
   与 detect_ai_text.py 双实现对拍：输出逐字节一致（长度=UTF-16 单元；数字用 InvariantCulture）。
   **不门禁、不替代朱雀三态**；0 命中≠达标。
 .PARAMETER InputFile
-  待检文本（UTF-8）。如 正文/第001章.md
+  待检文本（UTF-8）。如 正文/第001章_试炼.txt
 .PARAMETER ExtraLexicon
   可选外部词表（一行一词，# 注释）；与内置 scripts/ai-tells.txt 合并
 .PARAMETER FailOver
@@ -14,7 +14,7 @@
 param(
     [Parameter(Mandatory = $true)][string]$InputFile,
     [string]$ExtraLexicon = "",
-    [int]$FailOver = 0
+    [long]$FailOver = 0
 )
 $ErrorActionPreference = 'Stop'
 try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catch {}
@@ -27,7 +27,7 @@ function Load-Lexicon([string[]]$paths) {
     foreach ($p in $paths) {
         if ([string]::IsNullOrWhiteSpace($p) -or -not (Test-Path -LiteralPath $p)) { continue }
         foreach ($line in [System.IO.File]::ReadAllLines($p, [System.Text.Encoding]::UTF8)) {
-            $s = $line.Trim()
+            $s = $line.Trim($wsChars)
             if ($s -ne '' -and -not $s.StartsWith('#') -and -not $seen.ContainsKey($s)) {
                 $seen[$s] = $true; $out += $s
             }
@@ -35,19 +35,21 @@ function Load-Lexicon([string[]]$paths) {
     }
     return $out
 }
+# py 口径 ws 全集（str.isspace/strip；.NET 默认 Trim 不含 U+001C-U+001F，缺它们即与 py 反向）
+$wsChars = [char[]]@(0x09,0x0a,0x0b,0x0c,0x0d,0x1c,0x1d,0x1e,0x1f,0x20,0x85,0xa0,0x1680,0x2000,0x2001,0x2002,0x2003,0x2004,0x2005,0x2006,0x2007,0x2008,0x2009,0x200a,0x2028,0x2029,0x202f,0x205f,0x3000)
+$quoteChars = [char[]]@(0x22,0x27,0x300c,0x300d,0x300e,0x300f)
 function Trim-Sent([string]$s) {
-    $cut = " `t`r`n" + [string][char]0x3002 + [string][char]0xFF01 + [string][char]0xFF1F + [string][char]0xFF1B + [string][char]0x2026
-    $quotes = '"''' + [string][char]0x300C + [string][char]0x300D + [string][char]0x300E + [string][char]0x300F
-    while ($s.Length -gt 0 -and ($cut.IndexOf($s[0]) -ge 0 -or $quotes.IndexOf($s[0]) -ge 0)) { $s = $s.Substring(1) }
-    while ($s.Length -gt 0 -and ($cut.IndexOf($s[$s.Length - 1]) -ge 0 -or $quotes.IndexOf($s[$s.Length - 1]) -ge 0)) { $s = $s.Substring(0, $s.Length - 1) }
+    # py 口径：s.strip()（ws 全集一轮）→ .strip(引号)（一轮），不交替（旧实现交替切得比 py 多）
+    $s = $s.TrimStart($wsChars); $s = $s.TrimEnd($wsChars)
+    $s = $s.TrimStart($quoteChars); $s = $s.TrimEnd($quoteChars)
     return $s
 }
 
-if (-not (Test-Path -LiteralPath $InputFile)) { Write-Error "文件不存在：$InputFile"; exit 2 }
+if (-not (Test-Path -LiteralPath $InputFile)) { Write-Output ('❌ 文件不存在：{0}' -f $InputFile); exit 1 }
 $raw = [System.IO.File]::ReadAllText($InputFile, [System.Text.Encoding]::UTF8)
-$t = $raw.Replace("`r`n", "`n")
+$t = $raw.Replace("`r`n", "`n").Replace("`r", "`n")  # py open() 通用换行：lone \r 亦归 \n
 $units = $t.Length
-$paras = @($t -split "`n" | Where-Object { $_.Trim() -ne '' })
+$paras = @($t -split "`n" | Where-Object { $_.Trim($wsChars) -ne '' })
 $splitRe = [regex]'[。！？；…]+'
 $sents = @()
 foreach ($s in $splitRe.Split($t)) {
@@ -106,7 +108,7 @@ while ($i -lt ($sents.Count - 2)) {
         $k2 = $sents[$j + 1].Substring(0, [Math]::Min(2, $sents[$j + 1].Length))
         if ($k2 -ceq $k) { $j++ } else { break }
     }
-    if ((($j - $i) -ge 2) -and ($k -ne '')) { $runs += , @($i + 1, $j + 1, $k); $i = $j + 1 } else { $i++ }
+    if ((($j - $i) -ge 2) -and ($k -ne '')) { $runs += , @(($i + 1), ($j + 1), $k); $i = $j + 1 } else { $i++ }
 }
 $hitsTotal += $runs.Count
 $partsB = @()

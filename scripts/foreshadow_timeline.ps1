@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   foreshadow_timeline.ps1 —— 伏笔时间线可视化渲染（MU-1，P3-21）。
   与 foreshadow_timeline.py 双实现对拍：产物与 stdout 逐字节一致。
@@ -8,20 +8,20 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$Project,
-    [int]$CurrentCh = 0
+    [long]$CurrentCh = 0
 )
 $ErrorActionPreference = 'Stop'
 try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catch {}
 $inv = [System.Globalization.CultureInfo]::InvariantCulture
 $MARK = '<!-- generated:foreshadow-timeline v1 | 派生件禁手改，重跑本脚本再生成 -->'
 
-function Get-Day([int]$ch) {
+function Get-Day([long]$ch) {
     $n = [Math]::Max($ch, 1)
     return ([datetime]::new(2000, 1, 1)).AddDays($n - 1).ToString('yyyy-MM-dd', $inv)
 }
 function Get-Digits([string]$s) {
     $m = [regex]::Match([string]$s, '(\d+)')
-    if ($m.Success) { return [int]$m.Groups[1].Value }
+    if ($m.Success) { return [long]$m.Groups[1].Value }
     return $null
 }
 function Split-Row([string]$line) {
@@ -97,7 +97,7 @@ if (-not $hasState) {
         if ($idx.ContainsKey('plan') -and $idx['plan'] -lt $cells.Count) { $planTxt = $cells[$idx['plan']] }
         $planned = Get-Digits $planTxt
         if ($null -eq $planned) { $planned = 0 }
-        $items += [pscustomobject]@{ id = $fid; name = $name; planted = [int]$planted; planned = [int]$planned; resolved = 0; status = $status }
+        $items += [pscustomobject]@{ id = $fid; name = $name; planted = [long]$planted; planned = [long]$planned; resolved = 0; status = $status }
     }
 } else {
     $state = [System.IO.File]::ReadAllText($statePath, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
@@ -107,9 +107,9 @@ if (-not $hasState) {
     }
     foreach ($k in $fs.Keys) {
         $v = $fs[$k]
-        $pl = 0; if ($null -ne $v.PSObject.Properties['planted_ch'] -and $v.planted_ch) { $pl = [int]$v.planted_ch }
-        $planned = 0; if ($null -ne $v.PSObject.Properties['planned_resolve_ch'] -and $v.planned_resolve_ch) { $planned = [int]$v.planned_resolve_ch }
-        $rs = 0; if ($null -ne $v.PSObject.Properties['resolved_ch'] -and $v.resolved_ch) { $rs = [int]$v.resolved_ch }
+        $pl = 0; if ($null -ne $v.PSObject.Properties['planted_ch'] -and $v.planted_ch) { $pl = [long]$v.planted_ch }
+        $planned = 0; if ($null -ne $v.PSObject.Properties['planned_resolve_ch'] -and $v.planned_resolve_ch) { $planned = [long]$v.planned_resolve_ch }
+        $rs = 0; if ($null -ne $v.PSObject.Properties['resolved_ch'] -and $v.resolved_ch) { $rs = [long]$v.resolved_ch }
         $stt = 'open'; if ($rs -gt 0) { $stt = 'resolved' }
         $items += [pscustomobject]@{ id = [string]$k; name = [string]$v.desc; planted = $pl; planned = $planned; resolved = $rs; status = $stt }
     }
@@ -122,12 +122,12 @@ if ($CurrentCh -le 0) {
     if (Test-Path -LiteralPath $bodyDir) {
         foreach ($f in Get-ChildItem -File -Path $bodyDir) {
             $m = [regex]::Match($f.Name, '^第(\d+)章')
-            if ($m.Success) { $n = [int]$m.Groups[1].Value; if ($n -gt $CurrentCh) { $CurrentCh = $n } }
+            if ($m.Success) { $n = [long]$m.Groups[1].Value; if ($n -gt $CurrentCh) { $CurrentCh = $n } }
         }
     }
     if ($CurrentCh -eq 0 -and $hasState) {
         $st2 = [System.IO.File]::ReadAllText($statePath, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
-        if ($null -ne $st2.PSObject.Properties['last_committed_chapter'] -and $st2.last_committed_chapter) { $CurrentCh = [int]$st2.last_committed_chapter }
+        if ($null -ne $st2.PSObject.Properties['last_committed_chapter'] -and $st2.last_committed_chapter) { $CurrentCh = [long]$st2.last_committed_chapter }
     }
 }
 
@@ -222,7 +222,8 @@ $tDir = Split-Path -Parent $target
 if (-not (Test-Path -LiteralPath $tDir)) { New-Item -ItemType Directory -Path $tDir -Force | Out-Null }
 $tmp = "$target.tmp"
 [System.IO.File]::WriteAllText($tmp, (($out -join "`n") + "`n"), [System.Text.UTF8Encoding]::new($false))
-[System.IO.File]::Move($tmp, $target, $true)
+# 三参 File.Move 为 .NET Core 独有 → Move-Item -Force（5.1/7 通用，失败保留原文件）
+Move-Item -LiteralPath $tmp -Destination $target -Force
 
 [Console]::Out.WriteLine(('【伏笔时间线】源={0} ｜ 当前章=第{1}章 ｜ 条目 {2}：待收 {3} / 过期 {4} / 已回收 {5} / 停废 {6}' -f $src, $CurrentCh, $items.Count, $pending.Count, $overdue.Count, $resolved.Count, $rest.Count))
 [Console]::Out.WriteLine('已写出：记忆系统/圣经/伏笔时间线.md')

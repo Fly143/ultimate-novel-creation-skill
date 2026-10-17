@@ -32,8 +32,8 @@ commits: 86607cb..HEAD # v9.6.0 delivery + order/audit/check-done hard gates + r
 - 第六轮外部工程审阅：结构软校验 + 对外汇报硬约定 + CI 注释修正 → 本地 audit PASS + check-done 回归 PASS（含 weak-section 用例）
 - 第七轮外部审阅：§4.1 表序补齐 + 软校验强证据门槛 + 章号兼容 → 本地 audit PASS + check-done 回归 PASS（含策略话术拒绝）
 - 八轮外部审阅：结构证据防抄词表 + ps1 双入口回归 + allow-non-empty 禁令 → 本地 `test-check-done.py` py+ps1 全绿 + audit PASS
-- 九轮外部审阅：强证据邻接收紧（裸字数/裸≥300字降弱）+ 双实现同步约定 + audit 禁令词/空行 + 规格编号与 Verification 口径 → 本地 `test-check-done.py` **28/28 PASS**（py+ps1）+ `audit.ps1` PASS
-- 十轮代码审查全修：默认硬报告 + 默认 chapter + 规则单源 JSON + 正文段号交叉 + LintOrder 正则/豁免窗 → 本地 `test-check-done.py` **54/54 PASS**（py+ps1）+ `audit.ps1` PASS
+- 九轮外部审阅：强证据邻接收紧（裸字数/裸≥300字降弱）+ 双实现同步约定 + audit 禁令词/空行 + 规格编号与 Verification 口径 → 本地 `test-check-done.py` **28/28 PASS**（py+ps1，九轮时点读数；终态以执行清单:180 现值为准）+ `audit.ps1` PASS
+- 十轮代码审查全修：默认硬报告 + 默认 chapter + 规则单源 JSON + 正文段号交叉 + LintOrder 正则/豁免窗 → 本地 `test-check-done.py` **54/54 PASS**（py+ps1，十轮时点读数；终态以执行清单:180 现值为准）+ `audit.ps1` PASS
 
 **Journey log** —  
 1. 本地未提交的朱雀优化在 `git reset --hard origin/main` 后被丢弃；远程 origin/main **没有** 4.1e，需从零写入而非增量改。  

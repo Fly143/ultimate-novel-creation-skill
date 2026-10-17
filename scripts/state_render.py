@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """状态单 → 派生视图渲染（state_commit 调用；亦可独立运行）。
 
-【口径（与 state_render.ps1 逐字一致）】
+【口径（与 state_commit.ps1 内联渲染逐字一致）】
 - 度量/编码：UTF-8 无 BOM、换行 LF；所有内容由 `_state.json` 逐字段生成。
 - 派生文件头含 `<!-- derived:state-render v1 | revision=N -->`，供人识别"手改无效"。
 - 手改任何派生文件 → `state_commit check` 报 `derived view differs from _state.json` 并点名文件。
@@ -241,7 +241,11 @@ def main() -> int:
     except (FileNotFoundError, json.JSONDecodeError) as exc:
         print(f"❌ {exc}")
         return 1
-    views = render_views(state)
+    try:
+        views = render_views(state)
+    except Exception as exc:  # 独立入口 fail-closed：状态单类型非法不吐裸 Traceback
+        print(f"❌ 渲染派生视图失败（状态单类型非法：{exc}）")
+        return 1
     if args.compare:
         bad = compare_views(project, views)
         if bad:

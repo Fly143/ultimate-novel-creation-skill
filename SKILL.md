@@ -50,8 +50,9 @@ version: 9.6.0
 2. 字数检查通过 → `.done/第NNN章_wordcount.done`  
 3. 写后流水线 `modules/03_26_功能模块.md` **按序**已执行（不得「先交稿后补」）  
 4. **U 审核后先跑朱雀 4.1b–4.1e → `.done_zhuque`；再处理 FAIL/建议修复**（禁止整段重写人工段；修复改动大则补跑 4.1e）  
-5. 圣经/摘要 + U 相关 `.done` + **`.done/第NNN章_zhuque.done` 存在**  
-6. 闭环必需 `.done` 齐全（含 `zhuque` + `merge`；10 倍数章含 `innovation`）→ 才可写 `.done_chapter`  
+5. 圣经/摘要 + U 相关 `.done` + **`.done/第NNN章_zhuque.done` 存在**；新架构项目（存在 `_state.json`）另含 `state` 标记且 `last_committed_chapter ≥ 本章`  
+6. 闭环必需 `.done` 齐全（含 `zhuque` + `merge`；10 倍数章含 `innovation`；新架构 13 项含 `state`）**且细纲任务书四段齐、`（必落）` 拍全勾**（03_06 步骤2.6；脚本 `check-done --require-task-sheet`）→ 才可写 `.done_chapter`  
+7. `text_guard` 指纹与最终稿一致（03_26 五·文本指纹；流水线内改稿——4.1e 人工段注入/强化轮、4.3 修复轮——后已重跑 `digest`；证据 = `.story/text-digests.json` + `text_guard verify`）  
 
 **结束本章时必须输出【第NNN章状态】回执**（正文/字数/写后是否执行/朱雀预检三态/人工证据包动作/.done 清单/能否写下一章）。
 

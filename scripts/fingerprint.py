@@ -7,19 +7,23 @@
 """
 import re, sys, json
 
+def u(s: str) -> int:
+    """UTF-16 单元数（与 ps1 .Length / detect 的 utf-16-le 口径一致；含非 BMP 字符时≠ len()）。"""
+    return len(s.encode("utf-16-le")) // 2
+
 def main():
     if len(sys.argv) < 2:
         print("用法: python fingerprint.py <正文.txt>", file=sys.stderr); sys.exit(1)
     path = sys.argv[1]
     with open(path, encoding="utf-8", newline="") as f:   # newline="" 保留 \r\n，与 perl/ps1 口径一致
         t = f.read()
-    total = len(t)
+    total = u(t)
     if total == 0:
         print("文件为空", file=sys.stderr); sys.exit(1)
 
     # 段落（按换行切）
     paras = [x.strip() for x in t.splitlines() if x.strip()]
-    pl = [len(x) for x in paras]
+    pl = [u(x) for x in paras]
     pl.sort()
     pAvg = round(sum(pl)/len(pl)); pMed = pl[len(pl)//2]
     p50 = round(100.0*sum(1 for x in pl if x<=50)/len(pl), 1)
@@ -28,7 +32,7 @@ def main():
     # 句子（按中文句末标点切；\r\n 全删，与 perl/ps1 口径一致）
     raw = re.sub(r"\r?\n", "", t)
     sents = [x.strip() for x in re.findall(r"[^。！？!?…；;]+[。！？!?…；;]?", raw)]
-    sl = [len(x) for x in sents if 0 < len(x) < 300]
+    sl = [u(x) for x in sents if 0 < u(x) < 300]
     sl.sort()
     sAvg = round(sum(sl)/len(sl), 1); sMed = sl[len(sl)//2]
     s12 = round(100.0*sum(1 for x in sl if x<=12)/len(sl), 1)
@@ -37,13 +41,13 @@ def main():
     sVar = round(sum((x-mean)**2 for x in sl)/len(sl), 1)
 
     # 逗号间小节（句内节奏）
-    cl = [len(x.strip()) for x in re.findall(r"[^，。！？!?…；;、]+[，、]?", raw)]
+    cl = [u(x.strip()) for x in re.findall(r"[^，。！？!?…；;、]+[，、]?", raw)]
     cl = [x for x in cl if x > 0]
     cAvg = round(sum(cl)/len(cl), 1)
 
     # 对话占比（引号内字符）
     dq = re.findall(r"“[^”]*”|「[^」]*」", raw)
-    dqPct = round(100.0*sum(len(x) for x in dq)/total, 1)
+    dqPct = round(100.0*sum(u(x) for x in dq)/total, 1)
 
     # 每千字标点与修饰密度
     totalK = total/1000.0

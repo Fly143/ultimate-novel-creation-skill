@@ -1,7 +1,7 @@
-<#
+﻿<#
 .SYNOPSIS
   text_guard.ps1 —— 正文指纹与手改保护（P1-9）。
-  与 text_guard.py 双实现对拍：输出逐字节一致（长度=UTF-16 单元；sha256=正文 UTF-8 字节小写十六进制）。
+  与 text_guard.py 双实现对拍：输出逐字节一致（长度=UTF-16 单元；sha256=正文 UTF-8 字节小写十六进制）。账本 JSON 文件格式不承诺跨引擎一致（py=indent2+sort_keys+LF，ps1=ConvertTo-Json 键序/缩进随引擎），跨引擎 verify 语义一致。
   记录 {书名}/.story/text-digests.json（临时文件+原子替换）。不一致 → exit1 + 「沿用/重写/只看」处置口径。
 .PARAMETER Command
   digest | verify | verify-all
@@ -14,7 +14,7 @@
 param(
     [Parameter(Mandatory = $true)][ValidateSet('digest', 'verify', 'verify-all')][string]$Command,
     [Parameter(Mandatory = $true)][string]$Project,
-    [int]$Chapter = 0
+    [long]$Chapter = 0
 )
 $ErrorActionPreference = 'Stop'
 try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catch {}
@@ -24,7 +24,7 @@ $rulesPath = Join-Path $scriptDir 'check-done-rules.json'
 $rules = [System.IO.File]::ReadAllText($rulesPath, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
 $globs = @($rules.body_globs)
 
-function Find-Body([string]$proj, [int]$ch) {
+function Find-Body([string]$proj, [long]$ch) {
     $nnn = '{0:D3}' -f $ch
     foreach ($g in $globs) {
         $relPat = $g.Replace('{nnn}', $nnn).Replace('{ch}', "$ch")
@@ -66,13 +66,16 @@ if ($Command -eq 'digest') {
     $d = Get-Digest (Join-Path $Project $rel)
     $nnn = '{0:D3}' -f $Chapter
     $chapters[$nnn] = [pscustomobject]@{ sha256 = $d[0]; units = $d[1]; file = $rel }
-    # 原子写：临时文件 + 覆盖移动
+    # 原子写：临时文件 + 覆盖移动（.story 尚未创建时先建——与 py os.makedirs 同口径，防止未跑 init 的项目 digest 崩异常页）
+    $ledgerDir = Split-Path -Parent $ledgerPath
+    if ($ledgerDir -and -not (Test-Path -LiteralPath $ledgerDir)) { New-Item -ItemType Directory -Path $ledgerDir -Force | Out-Null }
     $tmp = $ledgerPath + '.tmp'
     $ordered = [ordered]@{}
     foreach ($k in ($chapters.Keys | Sort-Object)) { $ordered[$k] = $chapters[$k] }
     $obj = [pscustomobject]@{ version = 1; chapters = [pscustomobject]$ordered }
     [System.IO.File]::WriteAllText($tmp, ($obj | ConvertTo-Json -Depth 5), [System.Text.UTF8Encoding]::new($false))
-    [System.IO.File]::Move($tmp, $ledgerPath, $true)
+    # 三参 File.Move 为 .NET Core 独有 → Move-Item -Force（5.1/7 通用，失败保留原文件）
+    Move-Item -LiteralPath $tmp -Destination $ledgerPath -Force
     [Console]::Out.WriteLine("【文本指纹】第$nnn → sha256=$(Get-Short $d[0]) | 单元=$($d[1]) | 文件=$rel | 已记录")
     exit 0
 }
@@ -92,7 +95,7 @@ if ($Command -eq 'verify') {
     }
     $diff = [int]$d[1] - [int]$rec.units
     $sign = if ($diff -ge 0) { "+$diff" } else { "$diff" }
-    [Console]::Out.WriteLine("【手改检测】第$nnn 与记录不一致 —— 旧 sha256=$(Get-Short $rec.sha256)/单元=$($rec.units)，新 sha256=$(Get-Short $d[0])/单元=$($d[1])（差 $sign）→ 必须停下询问：沿用旧稿/按新稿重写/只看不处理（03_26 步骤7之二）")
+    [Console]::Out.WriteLine("【手改检测】第$nnn 与记录不一致 —— 旧 sha256=$(Get-Short $rec.sha256)/单元=$($rec.units)，新 sha256=$(Get-Short $d[0])/单元=$($d[1])（差 $sign）→ 必须停下询问：沿用旧稿/按新稿重写/只看不处理（03_26 五·文本指纹）")
     exit 1
 }
 
@@ -100,7 +103,7 @@ if ($Command -eq 'verify') {
 $okN = 0; $badN = 0
 foreach ($nnn in ($chapters.Keys | Sort-Object)) {
     $rec = $chapters[$nnn]
-    $rel = Find-Body $Project ([int]$nnn)
+    $rel = Find-Body $Project ([long]$nnn)
     if ($rel -eq '') { $rel = $rec.file }
     $fp = Join-Path $Project $rel
     if (-not (Test-Path -LiteralPath $fp)) {

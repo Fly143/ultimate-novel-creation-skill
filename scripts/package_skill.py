@@ -46,8 +46,11 @@ def collect(root: Path) -> list[str]:
         if not base.is_dir():
             continue
         for p in sorted(base.rglob("*")):
-            if p.is_file():
-                rels.append(p.relative_to(root).as_posix())
+            if not p.is_file():
+                continue
+            if "__pycache__" in p.parts or p.suffix in (".pyc", ".pyo"):
+                continue  # 机器本地字节码不进载荷（否则读数随本机状态漂移、zip 带陈旧字节）
+            rels.append(p.relative_to(root).as_posix())
     return sorted(set(rels))
 
 
@@ -63,7 +66,7 @@ def main() -> int:
     if not skill.is_file():
         print("❌ 缺少 SKILL.md")
         return 1
-    fm = frontmatter(skill.read_text(encoding="utf-8"))
+    fm = frontmatter(skill.read_text(encoding="utf-8-sig"))  # 带 BOM 的合法 SKILL.md 与 ps1 ReadAllText 剥 BOM 同口径
     missing = [k for k in FM_REQUIRED if not fm.get(k)]
     if missing:
         print(f"❌ SKILL.md frontmatter 缺字段：{'、'.join(missing)}")

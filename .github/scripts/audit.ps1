@@ -1,8 +1,8 @@
-# ============================================================
+﻿# ============================================================
 # 全能小说作家 - CI 完整性审计脚本（GitHub Actions 调用）
 # 检查：①死引用 ②孤儿文件 ③版本号一致性(SKILL vs README徽章) ④残留英文路径token
 #      ⑤裸英文术语(警告) ⑥裸行号引用(警告) ⑦写后顺序与 zhuque 门禁一致性
-# 用法：pwsh .github/scripts/audit.ps1 -Root <仓库路径> [-StrictOrphan] [-LintTerm] [-LintLineRef] [-LintBudget] [-LintOrder]
+# 用法：pwsh .github/scripts/audit.ps1 -Root <仓库路径> [-StrictOrphan] [-LintTerm] [-LintLineRef] [-LintBudget] [-LintOrder:$true|$false]（[bool] 参数，禁裸用；仅 pwsh 可传，PS5.1 -File 下绑定失败）
 #   -StrictOrphan : 孤儿判定收紧为「必须存在指向该资产路径的引用」（默认关闭，便于渐进收紧）
 #   -LintTerm     : 额外检查裸英文术语 volume/phase/stage/summary（仅警告，不阻断）
 #   -LintLineRef  : 额外检查「第N行」式行号引用（仅警告，不阻断）
@@ -17,11 +17,19 @@ param(
     [switch]$LintBudget,
     [bool]$LintOrder = $true
 )
+$ErrorActionPreference = 'Stop'
 $enc = New-Object System.Text.UTF8Encoding($false)
+# 控制台输出统一 UTF-8（与 check-doc-budget.ps1 同口径）：GBK 控制台下 ✅/❌ 才不会变 '?'
+try { [System.Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false) } catch { }
 $errors = @()
 $warns = @()
 # 归一化 Root 为绝对路径：后续用 $Root.Length 做 Substring 截取相对路径，
 # 传相对路径（如 -Root .）会导致路径错位、全部检查失效。
+# Root 存在性 fail-fast：不存在时 Get-ChildItem -Recurse -Filter 组合在 pwsh7/5.1 都会无限挂起。
+if (-not (Test-Path -LiteralPath $Root -PathType Container)) {
+    Write-Output ("❌ Root 目录不存在：{0}" -f $Root)
+    exit 1
+}
 $Root = (Resolve-Path -LiteralPath $Root).Path.TrimEnd('\','/')
 
 # ---------- ① 死引用审计 ----------
@@ -80,7 +88,7 @@ Get-ChildItem -Recurse -File $Root -Filter *.md | ForEach-Object {
     [regex]::Matches($line, $bareRe) | ForEach-Object { Test-Cand $_.Value $srcDir "BARE $rel :$ln" $line $_.Index }
   }
 }
-$genuine = @($broken.Keys | Where-Object { $_ -notmatch '记忆系统|设定/|正文/|导出/|拆解/|细纲/|报告/|\.done|项目|进度看板|创作状态追踪|商业可行性|创新深度|章节规划表|立项定位|文风设定|故事圣经|人物弧线|剧情时间线|伏笔清单|角色数据库|金手指约束|时间约束|叙事线|约束|阶段|卷|摘要|圣经|SMOKE_TEST|我的修仙小说|memory-system/|拆解报告|情节节点|情绪模块|人物模块|素材引用说明|文风' } | Where-Object { $_ -notmatch '\|\.md$' })
+$genuine = @($broken.Keys | Where-Object { $_ -notmatch '记忆系统|设定/|正文/|导出/|拆解/|细纲/|报告/|\.done|项目|进度看板|创作状态追踪|修订留痕|推演候选|商业可行性|创新深度|章节规划表|立项定位|文风设定|故事圣经|人物弧线|剧情时间线|伏笔清单|角色数据库|金手指约束|时间约束|叙事线|约束|阶段|卷|摘要|圣经|SMOKE_TEST|我的修仙小说|memory-system/|拆解报告|情节节点|情绪模块|人物模块|素材引用说明|文风' } | Where-Object { $_ -notmatch '\|\.md$' })
 if($genuine.Count){
   $errors += "死引用审计发现 $($genuine.Count) 处疑似问题："
   $genuine | Sort-Object | ForEach-Object { $errors += "  $_" }
@@ -133,6 +141,7 @@ if($StrictOrphan){
   foreach($f in $files){
     if($f -match '^(README|LICENSE|\.gitignore)'){ continue }
     if($f -like '.github/*'){ continue }   # .github/ 为维护者工具/文档，无需被 skill 内容引用
+    if($f -like '.agents/*'){ continue }   # ADR 为过程记录，不按资产判孤儿（与 -StrictOrphan 分支同口径）
     $base = [System.IO.Path]::GetFileName($f); $fwd = $f -replace '\\','/'
     $hits = 0
     foreach($k in $allText.Keys){ if($k -ne $fwd -and ($allText[$k].Contains($base) -or $allText[$k].Contains($fwd))){ $hits++ } }
@@ -144,9 +153,17 @@ if($StrictOrphan){
 # ---------- ③ 版本号一致性 ----------
 
 $skillVer = ''
+if (-not (Test-Path -LiteralPath (Join-Path $Root 'SKILL.md') -PathType Leaf)) {
+    Write-Output ("❌ 缺少 SKILL.md：{0}" -f (Join-Path $Root 'SKILL.md'))
+    exit 1
+}
 $skillContent = [System.IO.File]::ReadAllText((Join-Path $Root 'SKILL.md'), $enc)
 if($skillContent -match 'version:\s*([0-9]+\.[0-9]+\.[0-9]+)'){ $skillVer = $Matches[1] }
 $readmeVer = ''
+if (-not (Test-Path -LiteralPath (Join-Path $Root 'README.md') -PathType Leaf)) {
+    Write-Output ("❌ 缺少 README.md：{0}" -f (Join-Path $Root 'README.md'))
+    exit 1
+}
 $readmeContent = [System.IO.File]::ReadAllText((Join-Path $Root 'README.md'), $enc)
 if($readmeContent -match 'version-([0-9]+\.[0-9]+\.[0-9]+)-blue'){ $readmeVer = $Matches[1] }
 if($skillVer -eq '' -or $readmeVer -eq ''){ $errors += "版本号解析失败：SKILL=$skillVer README=$readmeVer" }
@@ -184,6 +201,7 @@ if($LintTerm){
       $ln = $lines[$i]
       if($ln -match '^\s*(```|~~~)'){ $inFence = -not $inFence; continue }
       if($inFence){ continue }
+      $ln = $ln -replace '`[^`]*(volume|phase|stage|summaries)[^`]*`', ''  # 反引号包裹的 JSON 字段/代码名不计
       if($ln -match '→|->'){ continue }   # 路径映射表（如 summaries→摘要）本就需要英文原名，豁免
       if($ln -match $termRe){ $termHits += "$rel :$($i+1) 裸英文术语 '$($Matches[1])'" }
     }
@@ -209,7 +227,7 @@ if($LintLineRef){
       if($ln -match '^\s*(```|~~~)'){ $inFence = -not $inFence; continue }
       if($inFence){ continue }
       # 只查「定位文档结构」的语境，避开写作指标（如「每千字」「第 N 章」）
-      if($ln -match '第\s*\d+\s*[-–~到至]\s*\d+\s*行' -or $ln -match '(总流程|本文件|上文|下文|步骤表).{0,10}第\s*\d+\s*行'){
+      if($ln -match '第\s*\d+\s*[-–~到至]\s*\d+\s*行' -or $ln -match '(总流程|本文件|上文|下文|步骤表).{0,10}第\s*\d+\s*行' -or $ln -match '\S+\.md.{0,15}第\s*\d+\s*行'){
         $lineHits += "$rel :$($i+1) 裸行号引用"
       }
     }

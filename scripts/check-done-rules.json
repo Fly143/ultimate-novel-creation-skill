@@ -72,5 +72,27 @@
       "pattern": "密度自查",
       "strong": false
     }
-  ]
+  ],
+  "task_sheet": {
+    "_comment": "章节任务书结构门禁（--require-task-sheet / -RequireTaskSheet）：写后闭环前校验细纲头部任务书；dirs 优先级从左到右（设定/细纲 为仓库实际约定）。",
+    "suffix": "_细纲.md",
+    "required_sections": [
+      "TASK",
+      "GOAL",
+      "MUST DO",
+      "CONTEXT"
+    ],
+    "required_item_mark": "（必落）",
+    "dirs": [
+      "设定/细纲",
+      "细纲"
+    ]
+  },
+  "state_mark": {
+    "_comment": "P0-3：项目存在 记忆系统/_state.json 时才要求 第NNN章_state.done（新增架构=13 项必需；无 state 文件的存量项目维持 12 项，向后兼容）。",
+    "name": "state",
+    "auto_when_state_file": true,
+    "state_file": "记忆系统/_state.json",
+    "require_last_committed": true
+  }
 }

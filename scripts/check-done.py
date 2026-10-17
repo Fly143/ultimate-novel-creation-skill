@@ -17,8 +17,9 @@
   python scripts/check-done.py -p . -c 10 --no-chapter-done
   python scripts/check-done.py -p . -c 12 --soft-report
   python scripts/check-done.py -p . -c 12 --allow-non-empty
+  python scripts/check-done.py -p . -c 12 --require-task-sheet   # 写后闭环：校验细纲任务书四段+必落拍全勾
 
-退出码：0=必需空标记齐且默认硬校验通过；1=缺标记/非空/路径错误/硬校验失败。
+退出码：0=必需空标记齐且默认硬校验通过；1=缺标记/非空/路径错误/硬校验失败/参数错误（与 ps1 一致，仅 0/1）。
 `--allow-non-empty`：仅限用户调试；宿主/LLM 禁止携带。
 `--strict-report`：兼容别名（默认已硬校验，等价于不加）。
 """
@@ -34,9 +35,99 @@ from pathlib import Path
 RULES_PATH = Path(__file__).resolve().parent / "check-done-rules.json"
 
 
+class _ArgParser(argparse.ArgumentParser):
+    """退出码契约仅 0/1（与 check-done.ps1 参数绑定失败=1 对齐）：用法错误也走 1。"""
+
+    def error(self, message: str):  # type: ignore[override]
+        self.print_usage(sys.stderr)
+        print(f"❌ 参数错误：{message}", file=sys.stderr)
+        raise SystemExit(1)
+
+
 def load_rules() -> dict:
-    with RULES_PATH.open(encoding="utf-8") as f:
-        return json.load(f)
+    if not RULES_PATH.is_file():
+        print(f"❌ 缺少规则单源：{RULES_PATH}")
+        raise SystemExit(1)
+    try:
+        with RULES_PATH.open(encoding="utf-8-sig") as f:
+            rules = json.load(f)
+    except json.JSONDecodeError as exc:
+        print(f"❌ 规则单源解析失败：{RULES_PATH}")
+        print(f"解析详情：{exc}", file=sys.stderr)
+        raise SystemExit(1)
+    if not isinstance(rules, dict):
+        print(f"❌ 规则单源解析失败：{RULES_PATH}（须为 JSON 对象）")
+        raise SystemExit(1)
+    errs: list[str] = []
+    for key in ("base_marks", "evidence_rules", "section_title", "min_hits",
+                "require_strong", "claim_para_pattern", "body_globs", "task_sheet"):
+        if key not in rules:
+            errs.append(f"缺 {key}")
+    bm = rules.get("base_marks")
+    if "base_marks" in rules:
+        if not isinstance(bm, list):
+            errs.append("base_marks 须为数组")
+        elif not all(isinstance(x, str) for x in bm):
+            errs.append("base_marks 元素须为字符串")
+    if "evidence_rules" in rules:
+        if not isinstance(rules["evidence_rules"], list):
+            errs.append("evidence_rules 须为数组")
+        elif not all(isinstance(r, dict) and {"name", "pattern", "strong"} <= set(r) for r in rules["evidence_rules"]):
+            errs.append("evidence_rules[i] 须为含 name/pattern/strong 的对象")
+        else:
+            for _er in rules["evidence_rules"]:
+                _ep = _er["pattern"]
+                if not isinstance(_ep, str):
+                    errs.append("evidence_rules[i].pattern 须为字符串")
+                elif re.search(r"\(\?P<|\(\?<|\(\?P=", _ep):
+                    errs.append("evidence_rules[i].pattern 须为跨引擎安全语法（禁命名组/命名回引 (?P<、(?<、(?P=）")
+                else:
+                    try:
+                        re.compile(_ep)
+                    except re.error:
+                        errs.append("evidence_rules[i].pattern 正则无效")
+    if "section_title" in rules and not isinstance(rules["section_title"], str):
+        errs.append("section_title 须为字符串")
+    if "min_hits" in rules:
+        mh = rules["min_hits"]
+        if not (isinstance(mh, int) and not isinstance(mh, bool)):
+            errs.append("min_hits 须为整数")
+    if "claim_para_pattern" in rules:
+        if not isinstance(rules["claim_para_pattern"], str):
+            errs.append("claim_para_pattern 须为字符串")
+        else:
+            _cp = rules["claim_para_pattern"]
+            # 命名组/命名回引两方言互不兼容（py 只认 (?P<x>、ps1 只认 (?<x>）→ 统一在双引擎拒收，跨引擎才可判
+            if re.search(r"\(\?P<|\(\?<|\(\?P=", _cp):
+                errs.append("claim_para_pattern 须为跨引擎安全语法（禁命名组/命名回引 (?P<、(?<、(?P=）")
+            else:
+                try:
+                    re.compile(_cp)
+                except re.error:
+                    errs.append("claim_para_pattern 正则无效")
+    if "body_globs" in rules:
+        if not isinstance(rules["body_globs"], list):
+            errs.append("body_globs 须为数组")
+        elif not all(isinstance(x, str) for x in rules["body_globs"]):
+            errs.append("body_globs 元素须为字符串")
+    if "task_sheet" in rules:
+        ts = rules["task_sheet"]
+        if not isinstance(ts, dict):
+            errs.append("task_sheet 须为对象")
+        else:
+            for sub, typ, lab in (("dirs", list, "dirs"), ("suffix", str, "suffix"),
+                                  ("required_sections", list, "required_sections"),
+                                  ("required_item_mark", str, "required_item_mark")):
+                if sub not in ts:
+                    errs.append(f"task_sheet 缺 {sub}")
+                elif not isinstance(ts[sub], typ):
+                    errs.append(f"task_sheet.{lab} 类型错误")
+                elif typ is list and sub in ("dirs", "required_sections") and not all(isinstance(x, str) for x in ts[sub]):
+                    errs.append(f"task_sheet.{lab} 元素须为字符串")
+    if errs:
+        print(f"❌ 规则单源校验失败：{RULES_PATH}（{'；'.join(errs)}）")
+        raise SystemExit(1)
+    return rules
 
 
 RULES = load_rules()
@@ -48,7 +139,15 @@ SECTION_TITLE: str = RULES["section_title"]
 MIN_HITS: int = int(RULES["min_hits"])
 REQUIRE_STRONG: bool = bool(RULES["require_strong"])
 CLAIM_PARA_RE: re.Pattern[str] = re.compile(RULES["claim_para_pattern"])
+STATE_MARK: dict = RULES.get("state_mark", {})
 BODY_GLOBS: list[str] = list(RULES["body_globs"])
+
+# 章节任务书结构门禁（P0-2）
+TASK_SHEET: dict = RULES["task_sheet"]
+TASK_DIRS: list[str] = list(TASK_SHEET["dirs"])
+TASK_SUFFIX: str = TASK_SHEET["suffix"]
+TASK_SECTIONS: list[str] = list(TASK_SHEET["required_sections"])
+TASK_ITEM_MARK: str = TASK_SHEET["required_item_mark"]
 
 
 def required_marks(chapter: int) -> list[str]:
@@ -135,9 +234,19 @@ def count_body_paragraphs(text: str) -> int:
         blocks.append("\n".join(cur))
     if not blocks:
         return 0
-    # 约定：第1块多为章节标题，段号从正文块起算时去掉标题
-    body_blocks = blocks[1:] if len(blocks) > 1 else blocks
-    if len(blocks) > 1 and any(x in blocks[0][:40] for x in ("第", "章")):
+    # 约定：首块为章节标题时段号从正文块起算（标题不计）。
+    # 标题判定（与 check-done.ps1 Count-BodyParagraphs 逐字同口径）：
+    # 块数>1 且首块前 40 个 UTF-16 码元内含「第」或「章」→ 视为标题。
+    def _head40(s: str) -> str:
+        return s.encode("utf-16-le")[:80].decode("utf-16-le", errors="ignore")
+
+    if len(blocks) > 1:
+        is_heading = any(x in _head40(blocks[0]) for x in ("第", "章"))
+        body_blocks = blocks[1:] if is_heading else blocks
+    else:
+        is_heading = False
+        body_blocks = blocks
+    if is_heading:
         return len(body_blocks)
     # 无明显标题：若全部是短行且无空行结构，按非空行
     if len(blocks) == 1 and "\n" in blocks[0]:
@@ -154,11 +263,11 @@ def find_body(project: Path, nnn: str, chapter: int) -> Path | None:
         return None
     for glob in BODY_GLOBS:
         pattern = glob.format(nnn=nnn, ch=chapter)
-        # fnmatch on relative path with /
-        for p in body_dir.parent.glob(pattern.replace("\\", "/")):
+        # 排序取首个：文件系统 glob 顺序不定，与 ps1 的 Sort-Object Name 对齐
+        for p in sorted(body_dir.parent.glob(pattern.replace("\\", "/"))):
             if p.is_file():
                 return p
-        for p in body_dir.glob(Path(pattern).name):
+        for p in sorted(body_dir.glob(Path(pattern).name)):
             if p.is_file():
                 return p
     # 兜底：前缀匹配
@@ -169,13 +278,27 @@ def find_body(project: Path, nnn: str, chapter: int) -> Path | None:
     return None
 
 
+def _try_i32(s: object) -> int | None:
+    """对齐 .NET Int32.TryParse：去前导零后仅 ASCII 十进制、≤10 位且 ≤ 2^31-1。"""
+    txt = s if isinstance(s, str) else ("" if s is None else str(s))
+    t = txt.lstrip("0") or "0"
+    if not re.fullmatch(r"[0-9]{1,10}", t):
+        return None
+    n = int(t)
+    return n if n <= 2_147_483_647 else None
+
+
 def check_body_claims(report_text: str, body: Path) -> list[str]:
     """报告声明段号 vs 正文段落数；返回错误消息列表。"""
-    claimed = [int(m) for m in CLAIM_PARA_RE.findall(report_text)]
+    claimed = []
+    for m in CLAIM_PARA_RE.findall(report_text):
+        n = _try_i32(m)  # 对齐 ps1 Int32.TryParse：仅 ASCII 十进制且 ≤ 2^31-1，其余安全跳过
+        if n is not None:
+            claimed.append(n)
     if not claimed:
         return []
     try:
-        body_text = body.read_text(encoding="utf-8", errors="replace")
+        body_text = body.read_text(encoding="utf-8-sig", errors="replace")
     except OSError as exc:
         return [f"正文交叉校验：无法读取正文 {body}：{exc}"]
     para_n = count_body_paragraphs(body_text)
@@ -215,7 +338,7 @@ def check_report(
             ],
             report_warns,
         )
-    text = report_path.read_text(encoding="utf-8", errors="replace")
+    text = report_path.read_text(encoding="utf-8-sig", errors="replace")
     if SECTION_TITLE not in text:
         return (
             "no-section",
@@ -248,8 +371,78 @@ def check_report(
     return "ok", [], report_warns
 
 
+def check_task_sheet(
+    project: Path, nnn: str, chapter: int
+) -> tuple[str, list[str]]:
+    """章节任务书结构门禁（写后闭环用）。返回 (状态, 错误列表)。
+
+    状态：skipped（未启用）/ missing / no-section / no-item / unchecked / ok
+    规则：细纲/第NNN章_细纲.md 必须含四段（TASK/GOAL/MUST DO/CONTEXT）；
+    MUST DO 内至少 1 条带「（必落）」的清单项，且写后须全部勾选 [x]。
+    """
+    sheet_path = None
+    expected_parts: list[str] = []
+    for rel in TASK_DIRS:
+        sheet_dir = project / rel
+        found, _warns = resolve_existing(sheet_dir, nnn, chapter, TASK_SUFFIX)
+        expected_parts.extend(
+            str(sheet_dir / n) for n in _candidate_names(nnn, chapter, TASK_SUFFIX)
+        )
+        if found is not None and found.is_file():
+            sheet_path = found
+            break
+    if sheet_path is None:
+        return "missing", [
+            "任务书校验：缺章节任务书（写前应构造、写后必须存在）："
+            + " / ".join(expected_parts)
+        ]
+    text = sheet_path.read_text(encoding="utf-8-sig", errors="replace")
+    lines = text.splitlines()
+    headings: dict[str, int] = {}
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        for sec in TASK_SECTIONS:
+            if stripped.startswith(f"### {sec}") and sec not in headings:
+                headings[sec] = i
+    missing_secs = [s for s in TASK_SECTIONS if s not in headings]
+    if missing_secs:
+        return "no-section", [
+            f"任务书校验：缺段 {', '.join(missing_secs)}"
+            f"（必需四段：{'/'.join(TASK_SECTIONS)}）→ {sheet_path}"
+        ]
+    if "MUST DO" not in TASK_SECTIONS:
+        return "config-error", [
+            "任务书校验：check-done-rules.json 的 task_sheet.required_sections 缺 MUST DO"
+            "（节拍清单锚点不可移除/改名）→ 修改规则单源后需同步双实现测试"
+        ]
+    # MUST DO 块范围：从其标题到下一个同级/更高级标题
+    start = headings["MUST DO"]
+    end = len(lines)
+    for i in range(start + 1, len(lines)):
+        if lines[i].strip().startswith("### "):
+            end = i
+            break
+    item_re = re.compile(r"^\s*-\s*\[([ xX])\][^\n]*" + re.escape(TASK_ITEM_MARK))
+    items: list[tuple[bool, str]] = []
+    for line in lines[start + 1 : end]:
+        m = item_re.match(line)
+        if m:
+            items.append((m.group(1).lower() == "x", line.strip()))
+    if not items:
+        return "no-item", [
+            f"MUST DO 缺「{TASK_ITEM_MARK}」节拍清单项（不允许边写边想）→ {sheet_path}"
+        ]
+    unchecked = [label for done, label in items if not done]
+    if unchecked:
+        return "unchecked", [
+            f"任务书校验：漏必落拍 {len(unchecked)}/{len(items)}（写后须全勾，否则本章判未完成）："
+            + "；".join(unchecked)
+        ]
+    return "ok", []
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description="核验第 N 章写后流水线 .done 空标记")
+    parser = _ArgParser(description="核验第 N 章写后流水线 .done 空标记")
     parser.add_argument("-p", "--project", required=True, help="项目（书名）目录")
     parser.add_argument("-c", "--chapter", required=True, type=int, help="章节号，如 12")
     parser.add_argument(
@@ -277,6 +470,11 @@ def main() -> int:
         action="store_true",
         help="仅限用户本地调试：非空标记仍视为存在（宿主/LLM 闭环核验禁止使用）",
     )
+    parser.add_argument(
+        "--require-task-sheet",
+        action="store_true",
+        help="写后闭环：校验细纲章节任务书四段齐全且必落拍全勾（缺则 exit1）",
+    )
     args = parser.parse_args()
 
     # 兼容：--strict-report 与默认硬校验一致；--include-chapter-done 与默认一致
@@ -302,6 +500,13 @@ def main() -> int:
 
     nnn = f"{chapter:03d}"
     required = required_marks(chapter)
+    # P0-3：存在 记忆系统/_state.json → 追加 state 标记（无 state 文件的存量项目不追加）
+    state_rel = STATE_MARK.get("state_file", "记忆系统/_state.json")
+    state_file = project / state_rel
+    state_on = bool(STATE_MARK.get("auto_when_state_file", True)) and state_file.is_file()
+    state_errs: list[str] = []
+    if state_on:
+        required = required + [str(STATE_MARK.get("name", "state"))]
     present: list[str] = []
     nonempty: list[str] = []
     missing: list[str] = []
@@ -353,6 +558,35 @@ def main() -> int:
     else:
         print("chapter.done：不存在")
     print(f"报告校验：{report_status}（{report_mode}）")
+    if state_on and STATE_MARK.get("require_last_committed", True):
+        try:
+            with state_file.open(encoding="utf-8") as fh:
+                _st = json.load(fh)
+            _last = _st.get("last_committed_chapter")
+            if not (isinstance(_last, int) and not isinstance(_last, bool)):
+                state_errs.append(f"状态单校验：last_committed_chapter 不是整数 → {state_file}")
+            elif _last < chapter:
+                state_errs.append(
+                    f"状态单落后：last_committed_chapter={_last} < 第{chapter}章"
+                    f"（先 state_commit commit --chapter {chapter} 再闭环）"
+                )
+        except (OSError, json.JSONDecodeError) as exc:
+            state_errs.append(f"状态单校验：无法读取 {state_file}：{exc}")
+    _state_line = (
+        f"状态单：required（{state_rel} 存在）"
+        if state_on
+        else (
+            "状态单：skipped（auto_when_state_file=false，走旧路径）"
+            if not STATE_MARK.get("auto_when_state_file", True)
+            else "状态单：skipped（无 _state.json，走旧路径）"
+        )
+    )
+    print(_state_line)
+    if args.require_task_sheet:
+        task_status, task_errs = check_task_sheet(project, nnn, chapter)
+        print(f"任务书校验：{task_status}（require-task-sheet）")
+    else:
+        task_status, task_errs = "skipped", []
     if name_conflicts:
         print("⚠️ 章号命名冲突：")
         for m in name_conflicts:
@@ -374,6 +608,11 @@ def main() -> int:
                 f"❌ 未闭环：{len(nonempty)} 项标记非空（标准=size0）：{', '.join(nonempty)}"
             )
             print("修复：清空对应 .done 文件内容（保留文件名），或删除后重写")
+        if state_on and str(STATE_MARK.get("name", "state")) in missing:
+            print(
+                f"提示：缺 {str(STATE_MARK.get('name', 'state'))} → 须先跑 scripts/state_commit.py commit --chapter N"
+                "（派生一致性用 state_commit check 核验）"
+            )
         if "zhuque" in missing:
             print(
                 "提示：缺 zhuque → 须补跑 03_26 4.1b–4.1e 人工证据包（见 modules/03_26_功能模块.md）"
@@ -398,6 +637,21 @@ def main() -> int:
         print("❌ 报告校验未通过（默认硬校验；仅调试可用 --soft-report）：")
         for m in report_msgs:
             print(f"  {m}")
+        return 1
+
+    if state_errs:
+        print()
+        print("❌ 状态单校验未通过：")
+        for m in state_errs:
+            print(f"  {m}")
+        return 1
+
+    if task_errs:
+        print()
+        print("❌ 任务书校验未通过（--require-task-sheet）：")
+        for m in task_errs:
+            print(f"  {m}")
+        print("修复：补写 细纲/第NNN章_细纲.md 任务书四段并勾选必落拍（模板见 templates/章节任务书模板.md）")
         return 1
 
     print()

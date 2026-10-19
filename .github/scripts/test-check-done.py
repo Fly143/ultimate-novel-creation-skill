@@ -2049,7 +2049,7 @@ def _run(results: list[bool]) -> int:
                 if _tq:
                     cmd.append("-RequireTaskSheet")
             pr = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
-            outs.append((pr.returncode, _nl(_norm_flags(_decode(pr.stdout))).replace(str(proj), "<PROJ>")))
+            outs.append((pr.returncode, _nl(_norm_flags(_decode(pr.stdout))).replace(str(proj), "<PROJ>").replace(_pnorm(str(proj)), "<PROJ>")))
         return outs
 
     _rrC9 = {e: _cd3e9(e) for e in ENGINES}
@@ -2260,7 +2260,7 @@ def _run(results: list[bool]) -> int:
         else:
             cmd = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(ROOT / "scripts" / "check-done.ps1"), "-Project", str(proj), "-Chapter", "3000000000"]
         pr = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
-        return pr.returncode, _decode(pr.stdout).replace(str(proj), "<PROJ>")
+        return pr.returncode, _decode(pr.stdout).replace(str(proj), "<PROJ>").replace(_pnorm(str(proj)), "<PROJ>")
 
     _rrC40 = {e: _cross40(e) for e in ENGINES}
     results.append(case("[十二轮] 正文交叉真实执行（3e9 章第40段声明）→ 双引擎同文案 body-mismatch", True,
@@ -2679,7 +2679,7 @@ def _run(results: list[bool]) -> int:
             mk(j)
             spf.write_text(json.dumps(j, ensure_ascii=False, indent=2), encoding="utf-8")
             rc, out = run_state(engine, "check", "--project", str(proj))
-            _null_msgs[engine].append(out.strip().replace(str(proj), "<PROJ>"))
+            _null_msgs[engine].append(out.strip().replace(str(proj), "<PROJ>").replace(_pnorm(str(proj)), "<PROJ>"))
             okv = okv and rc == 1 and needle in out
         return okv
     results += check_engines("[十八轮] null 元素四形态 → check 双引擎同文案 rc1（无 null 豁免）", True, _nullelem_ok)
@@ -2933,7 +2933,7 @@ def _run(results: list[bool]) -> int:
         _st.write_bytes(b"\xef\xbb\xbf" + _st.read_bytes())
         _rc1, _o1 = run_state(engine, "draft", "--project", str(_pj), "--chapter", "1")
         _rc2, _o2 = run_state(engine, "check", "--project", str(_pj))
-        return _rc1, _nl(_o1).replace(str(_pj), "<PROJ>"), _rc2, _nl(_o2).replace(str(_pj), "<PROJ>")
+        return _rc1, _nl(_o1).replace(str(_pj), "<PROJ>").replace(_pnorm(str(_pj)), "<PROJ>"), _rc2, _nl(_o2).replace(str(_pj), "<PROJ>").replace(_pnorm(str(_pj)), "<PROJ>")
     _rr_bs = {e: _bomst_run(e) for e in ENGINES}
     results.append(case("[二十三轮] _state.json 带 BOM → 双引擎 draft/check 同判 rc0（load_json utf-8-sig）", True,
                         _rr_bs["py"][0] == 0 and _rr_bs["py"][2] == 0
@@ -3016,7 +3016,7 @@ def _run(results: list[bool]) -> int:
         else:
             _cd = [PY, str(ROOT / "scripts" / "check-done.py"), "--project", str(_pj), "--chapter", "1", "--soft-report"]
         _pr_cd = subprocess.run(_cd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
-        return _rc1, _nl(_o1).replace(str(_pj), "<PROJ>"), _pr_cd.returncode, _nl(_pr_cd.stdout.decode("utf-8", "replace")).replace(str(_pj), "<PROJ>")
+        return _rc1, _nl(_o1).replace(str(_pj), "<PROJ>").replace(_pnorm(str(_pj)), "<PROJ>"), _pr_cd.returncode, _nl(_pr_cd.stdout.decode("utf-8", "replace")).replace(str(_pj), "<PROJ>").replace(_pnorm(str(_pj)), "<PROJ>")
     _rr_tri = {e: _tri64(e) for e in ENGINES}
     results.append(case("[二十四轮] last_committed_chapter=10^30 → 双引擎 state check rc1 同文案（Int64 上界）", True,
                         all(v[0] == 1 and "last_committed_chapter 必须是整数" in v[1] for v in _rr_tri.values())
@@ -3034,7 +3034,7 @@ def _run(results: list[bool]) -> int:
         _sj["state_revision"] = None
         _stf.write_text(json.dumps(_sj, ensure_ascii=False, indent=2), encoding="utf-8")
         _rc1, _o1 = run_state(engine, "check", "--project", str(_pj))
-        return _rc1, _nl(_o1).replace(str(_pj), "<PROJ>")
+        return _rc1, _nl(_o1).replace(str(_pj), "<PROJ>").replace(_pnorm(str(_pj)), "<PROJ>")
     _rr_rn = {e: _revnull(e) for e in ENGINES}
     results.append(case("[二十四轮] state_revision 显式 null → 双引擎 check 同判 rc1「必须是整数」", True,
                         all(v[0] == 1 and "state_revision 必须是整数" in v[1] for v in _rr_rn.values())
@@ -3057,7 +3057,7 @@ def _run(results: list[bool]) -> int:
             _c_tg = [PY, str(_tgd / "text_guard.py"), "digest", "--project", str(_pj_tg), "--chapter", "1"]
         _pr_tg = subprocess.run(_c_tg, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
         _led_ok = (_pj_tg / ".story" / "text-digests.json").is_file()
-        _rr_tgb[_e_tg] = (_pr_tg.returncode, _nl((_pr_tg.stdout + _pr_tg.stderr).decode("utf-8", "replace")).replace(str(_tgd), "<TG>"), _led_ok)
+        _rr_tgb[_e_tg] = (_pr_tg.returncode, _nl((_pr_tg.stdout + _pr_tg.stderr).decode("utf-8", "replace")).replace(str(_tgd), "<TG>").replace(_pnorm(str(_tgd)), "<TG>"), _led_ok)
     results.append(case("[二十四轮] text_guard 规则单带 BOM → 双引擎 digest rc0 且账本真实落盘同文案（rules 读取 utf-8-sig）", True,
                         all(v[0] == 0 and v[2] for v in _rr_tgb.values())
                         and len(set(_rr_tgb.values())) == 1))
@@ -3102,7 +3102,7 @@ def _run(results: list[bool]) -> int:
         _stf.write_text(json.dumps(_sj, ensure_ascii=False, indent=2), encoding="utf-8")
         _txn = write_txn(_pj, 1, {"characters": {"甲": {"snapshot": "s"}}})
         _rc1, _o1 = run_state(engine, "commit", "--project", str(_pj), "--chapter", "1", "--input", str(_txn))
-        return _rc1, _nl(_o1).replace(str(_pj), "<PROJ>")
+        return _rc1, _nl(_o1).replace(str(_pj), "<PROJ>").replace(_pnorm(str(_pj)), "<PROJ>")
     _rr_top = {e: _i64top(e) for e in ENGINES}
     results.append(case("[二十五轮] state_revision=Int64 上界 → 双引擎 commit 同判 rc1「自增会溢出」（拒绝提交）", True,
                         all(v[0] == 1 and "自增会溢出" in v[1] for v in _rr_top.values())
@@ -3133,7 +3133,7 @@ def _run(results: list[bool]) -> int:
         _sj["foreshadow"] = {"F1": {"desc": "玉佩", "planted_ch": 3.5}}
         _stf.write_text(json.dumps(_sj, ensure_ascii=False, indent=2), encoding="utf-8")
         _rc1, _o1 = run_state(engine, "check", "--project", str(_pj))
-        return _rc1, _nl(_o1).replace(str(_pj), "<PROJ>")
+        return _rc1, _nl(_o1).replace(str(_pj), "<PROJ>").replace(_pnorm(str(_pj)), "<PROJ>")
     _rr_ff = {e: _ffloat(e) for e in ENGINES}
     results.append(case("[二十七轮] foreshadow.planted_ch=3.5 → 双引擎 state check 同判 rc1「必须是非负整数」", True,
                         all(v[0] == 1 and "planted_ch 必须是非负整数" in v[1] for v in _rr_ff.values())
@@ -3168,7 +3168,7 @@ def _run(results: list[bool]) -> int:
         else:
             _c_fo = [PY, str(FS_PY), "--project", str(_pj)]
         _pr_fo = subprocess.run(_c_fo, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
-        return _pr_fo.returncode, _nl(_pr_fo.stdout.decode("utf-8", "replace")).replace(str(_pj), "<PROJ>")
+        return _pr_fo.returncode, _nl(_pr_fo.stdout.decode("utf-8", "replace")).replace(str(_pj), "<PROJ>").replace(_pnorm(str(_pj)), "<PROJ>")
     _rr_fo = {e: _fobj(e) for e in ENGINES}
     results.append(case("[二十七轮] foreshadow.F1 非对象（独立运行）→ 双引擎 rc1 同文案「须为对象」", True,
                         all(v[0] == 1 and "须为对象" in v[1] for v in _rr_fo.values())
@@ -3204,7 +3204,7 @@ def _run(results: list[bool]) -> int:
         _sj["foreshadow"] = {"F1": {"desc": "玉佩", "planted_ch": 1, "resolved_ch": -1}}
         _stf.write_text(json.dumps(_sj, ensure_ascii=False, indent=2), encoding="utf-8")
         _rc1, _o1 = run_state(engine, "check", "--project", str(_pj))
-        return _rc1, _nl(_o1).replace(str(_pj), "<PROJ>")
+        return _rc1, _nl(_o1).replace(str(_pj), "<PROJ>").replace(_pnorm(str(_pj)), "<PROJ>")
     _rr_fn = {e: _fneg(e) for e in ENGINES}
     results.append(case("[二十八轮] resolved_ch=-1 → 双引擎 state check 同判 rc1「必须是非负整数」", True,
                         all(v[0] == 1 and "必须是非负整数" in v[1] for v in _rr_fn.values())
@@ -3227,7 +3227,7 @@ def _run(results: list[bool]) -> int:
             _c_fn = [PY, str(FS_PY), "--project", str(_pj)]
         _pr_fn = subprocess.run(_c_fn, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
         _md = _pj / "记忆系统" / "圣经" / "伏笔时间线.md"
-        return _pr_fn.returncode, _nl(_pr_fn.stdout.decode("utf-8", "replace")).replace(str(_pj), "<PROJ>"), (_md.read_text(encoding="utf-8") if _md.is_file() else "")
+        return _pr_fn.returncode, _nl(_pr_fn.stdout.decode("utf-8", "replace")).replace(str(_pj), "<PROJ>").replace(_pnorm(str(_pj)), "<PROJ>"), (_md.read_text(encoding="utf-8") if _md.is_file() else "")
     _rr_fnn = {e: _fnull(e) for e in ENGINES}
     results.append(case("[二十八轮] foreshadow=null + 非空伏笔清单 → 双引擎同走清单路径 rc0 产物一致", True,
                         all(v[0] == 0 for v in _rr_fnn.values())
@@ -3261,7 +3261,7 @@ def _run(results: list[bool]) -> int:
             _c_fs2 = [PY, str(FS_PY), "--project", str(_pj)]
         _pr_fs2 = subprocess.run(_c_fs2, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
         _md = _pj / "记忆系统" / "圣经" / "伏笔时间线.md"
-        return _pr_fs2.returncode, _nl(_pr_fs2.stdout.decode("utf-8", "replace")).replace(str(_pj), "<PROJ>"), (_md.read_text(encoding="utf-8") if _md.is_file() else "")
+        return _pr_fs2.returncode, _nl(_pr_fs2.stdout.decode("utf-8", "replace")).replace(str(_pj), "<PROJ>").replace(_pnorm(str(_pj)), "<PROJ>"), (_md.read_text(encoding="utf-8") if _md.is_file() else "")
     _rr_fs2 = {e: _fstr(e) for e in ENGINES}
     results.append(case("[二十八轮] 独立运行 planted_ch=\"3.5\" → 双引擎截断 3 同文案 rc0 产物一致", True,
                         all(v[0] == 0 for v in _rr_fs2.values())
@@ -3286,7 +3286,7 @@ def _run(results: list[bool]) -> int:
             _c_fe = [PY, str(FS_PY), "--project", str(_pj)]
         _pr_fe = subprocess.run(_c_fe, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
         _md = _pj / "记忆系统" / "圣经" / "伏笔时间线.md"
-        return _pr_fe.returncode, _nl(_pr_fe.stdout.decode("utf-8", "replace")).replace(str(_pj), "<PROJ>"), (_md.read_text(encoding="utf-8") if _md.is_file() else "")
+        return _pr_fe.returncode, _nl(_pr_fe.stdout.decode("utf-8", "replace")).replace(str(_pj), "<PROJ>").replace(_pnorm(str(_pj)), "<PROJ>"), (_md.read_text(encoding="utf-8") if _md.is_file() else "")
     _rr_fe = {e: _fedge(e) for e in ENGINES}
     results.append(case("[二十九轮] foreshadow 边界（desc=null/planted=\"\"/planned=-5）→ 双引擎 rc0 产物逐字一致", True,
                         all(v[0] == 0 for v in _rr_fe.values())
@@ -3307,7 +3307,7 @@ def _run(results: list[bool]) -> int:
         else:
             _c_fc = [PY, str(FS_PY), "--project", str(_pj), "--current-ch", "-3"]
         _pr_fc = subprocess.run(_c_fc, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
-        return _pr_fc.returncode, _nl(_pr_fc.stdout.decode("utf-8", "replace")).replace(str(_pj), "<PROJ>")
+        return _pr_fc.returncode, _nl(_pr_fc.stdout.decode("utf-8", "replace")).replace(str(_pj), "<PROJ>").replace(_pnorm(str(_pj)), "<PROJ>")
     _rr_fc = {e: _fnegcur(e) for e in ENGINES}
     results.append(case("[二十九轮] --current-ch=-3 → 双引擎视为未传同文案（当前章=探测值）", True,
                         len(set(_rr_fc.values())) == 1 and "第10章" in _rr_fc["py"][1]))
@@ -3325,7 +3325,7 @@ def _run(results: list[bool]) -> int:
         else:
             _c_ia = [PY, str(ROOT / "scripts" / "state_commit.py"), "init", "--project", str(_pj), "--input", str(_inp)]
         _pr_ia = subprocess.run(_c_ia, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
-        return _pr_ia.returncode, _nl(_pr_ia.stdout.decode("utf-8", "replace")).replace(str(_pj), "<PROJ>")
+        return _pr_ia.returncode, _nl(_pr_ia.stdout.decode("utf-8", "replace")).replace(str(_pj), "<PROJ>").replace(_pnorm(str(_pj)), "<PROJ>")
     _rr_fa = {e: _iarr(e, {"facts": "notalist"}) for e in ENGINES}
     results.append(case("[二十九轮] init facts=字符串 → 双引擎 rc1「facts 须为数组」（契约统一）", True,
                         all(v[0] == 1 and "facts 须为数组" in v[1] for v in _rr_fa.values())
@@ -3373,7 +3373,7 @@ def _run(results: list[bool]) -> int:
         else:
             _c_pf = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(ROOT / "scripts" / "state_commit.ps1"), "init", "-Project", str(_pf)]
         _pr_pf = subprocess.run(_c_pf, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
-        _rr_pf[_e_pf] = (_pr_pf.returncode, _nl(_decode(_pr_pf.stdout)).replace(str(_pf), "<PROJ>"))
+        _rr_pf[_e_pf] = (_pr_pf.returncode, _nl(_decode(_pr_pf.stdout)).replace(str(_pf), "<PROJ>").replace(_pnorm(str(_pf)), "<PROJ>"))
     results.append(case("[三十一轮] state_commit -Project 普通文件 → 双引擎 rc1 同文案「项目目录不存在」（Container 闸）", True,
                         all(v[0] == 1 and "项目目录不存在" in v[1] for v in _rr_pf.values())
                         and len(set(_rr_pf.values())) == 1))

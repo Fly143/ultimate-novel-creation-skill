@@ -1657,7 +1657,21 @@ def _run(results: list[bool]) -> int:
                 and "保留原位" in out1
                 and (proj / "记忆系统" / "摘要" / "模板.md").is_file()
                 and (proj / "记忆系统" / "_旧存档" / "摘要" / "第001章摘要.md").is_file())
-    results += check_engines("[🔴回归] migrate 归档白名单 → 角色数据库保留原位、派生件归档后重渲染", True, _mig_ok)
+    for _e_mig in ENGINES:  # 带子条件 detail：CI 上 ps1 曾单独红，须点名是哪一条（rc/文案/文件）
+        try:
+            _mig_cond = bool(_mig_ok(_e_mig))
+            _mig_detail = ""
+        except Exception as _exc:  # noqa: BLE001
+            _mig_cond = False
+            _mig_detail = f"{type(_exc).__name__}: {_exc}"
+        if not _mig_cond and not _mig_detail:
+            _mp_mig = _nhd / f"p_mig_{_e_mig}"
+            _b_mig = _mp_mig / "记忆系统" / "圣经"
+            _rc1_m, _o1_m = _mig_run(_e_mig, _mp_mig, False)
+            _mig_detail = (f"dry_rc={_rc1_m} 保留原位={'保留原位' in _o1_m} "
+                           f"角色库={(_b_mig / '角色数据库.md').is_file()} 圣经={(_b_mig / '故事圣经.md').is_file()} "
+                           f"归档={(_mp_mig / '记忆系统' / '_旧存档' / '圣经' / '作者真相时间线.md').is_file()}")
+        results.append(case(f"[🔴回归] migrate 归档白名单 → 角色数据库保留原位、派生件归档后重渲染 [{_e_mig}]", True, _mig_cond, _mig_detail))
 
     # x) ch0 大纲种子提交：draft/commit --chapter 0 → 渲染真相时间线、不产生 .done 标记
     def _seed_ok(engine):
@@ -1745,10 +1759,11 @@ def _run(results: list[bool]) -> int:
         return pr.returncode, _decode(pr.stdout)
 
     _rr5 = {e: _bud_missing(e) for e in ENGINES}
+    _miss_n = _pnorm(_missing).lower()  # needle 也走归一（CI 上首行路径形态与原形不同）
     results.append(case("[修复] 预算 -Root 不存在路径 → 双引擎首行同为绝对路径且同判 exit1", True,
                         len({(v[0], _nl(v[1])) for v in _rr5.values()}) == 1 and _rr5["py"][0] == 1
-                        and _missing.lower().replace("/", "\\") in _rr5["py"][1].splitlines()[0].lower()
-                        and _missing.lower().replace("/", "\\") in _rr5["ps1"][1].splitlines()[0].lower()))
+                        and _miss_n in _pnorm(_rr5["py"][1]).splitlines()[0].lower()
+                        and _miss_n in _pnorm(_rr5["ps1"][1]).splitlines()[0].lower()))
 
     # z3) -Project 指向普通文件 → 双引擎同文案 exit1（ps1 补 -PathType Container 后与 py is_dir 同判）
     p_file = _nhd / "p_isfile.txt"

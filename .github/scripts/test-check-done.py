@@ -88,6 +88,27 @@ def _decode(data: bytes | None) -> str:
     return data.decode("utf-8", errors="replace")
 
 
+_PN_TOKEN = __import__("re").compile(r"[A-Za-z]:[\\/][^\s\"'<>|*?,，；、（）]+")
+
+
+def _pnorm_one(_m):
+    tok = _m.group(0).replace("/", "\\")
+    tok = tok[0].upper() + tok[1:]
+    try:
+        import os as _os
+        rp = _os.path.realpath(tok)
+        if _os.path.exists(rp):
+            return rp
+    except (OSError, ValueError):
+        pass
+    return tok
+
+
+def _pnorm(s: str) -> str:
+    """路径形态归一：CI 的 temp 路径（8.3 短名/盘符大小写/正斜杠）在 py 与 .NET 两侧呈现不同 → 对拍前统一展开为长名+大写盘符+反斜杠。"""
+    return _PN_TOKEN.sub(_pnorm_one, s)
+
+
 def run_ps1(project: Path, chapter: int, *extra: str) -> tuple[int, str]:
     mapped = [FLAG_MAP[e] for e in extra]
     proc = subprocess.run(
@@ -1053,8 +1074,8 @@ def _run(results: list[bool]) -> int:
             return s
 
         def _nl(s: str) -> str:
-            # 行尾归一（ps1 Write-Output → \r\n，py print → \n；内容对拍不比较传输行尾）
-            return s.replace("\r\n", "\n")
+            # 行尾归一（ps1 Write-Output → \r\n，py print → \n；内容对拍不比较传输行尾）+ 路径形态归一（CI temp 8.3 短名/盘符大小写在 py 与 .NET 两侧呈现不同）
+            return _pnorm(s.replace("\r\n", "\n"))
 
         _nhd = Path(tempfile.mkdtemp(prefix="nonhead-"))
 

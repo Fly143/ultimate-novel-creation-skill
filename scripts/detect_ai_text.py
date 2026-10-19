@@ -23,12 +23,26 @@ BASE_LEXICON = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ai-tell
 SENT_SPLIT = re.compile(r"[。！？；…]+")
 
 
+def _i64(s):
+    # Int64 范围收口（对齐 ps1 [long] 绑定失败 rc1 / check-doc-budget _in_i64 先例）
+    _t = str(s)
+    if not re.fullmatch(r"-?[0-9]+", _t):  # 纯 ASCII 十进制（int(…,10) 会接受下划线/非 ASCII 数字如 3_0/١٢，ps1 [long] 绑定拒绝 → 反向裁决）
+        raise argparse.ArgumentTypeError(f"非十进制整数：{s}")
+    try:
+        v = int(_t, 10)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"非十进制整数：{s}")
+    if not (-2**63 <= v < 2**63):
+        raise argparse.ArgumentTypeError(f"超出 Int64 范围：{s}")
+    return v
+
+
 def load_lexicon(paths):
     tokens = []
     for p in paths:
-        if not p or not os.path.exists(p):
+        if not p or not os.path.isfile(p):  # 目录亦跳过（对齐 ps1 -PathType Leaf）
             continue
-        with open(p, encoding="utf-8") as f:
+        with open(p, "r", encoding="utf-8-sig") as f:
             for line in f:
                 s = line.strip()
                 if s and not s.startswith("#"):
@@ -42,17 +56,24 @@ def load_lexicon(paths):
     return out
 
 
+class _ArgParser(argparse.ArgumentParser):
+    # 参数错误收敛 rc1 + 中文（对齐 check-done/check-doc-budget；ps1 绑定失败亦 rc1）
+    def error(self, message):
+        print(f"❌ 参数错误：{message}")
+        raise SystemExit(1)
+
+
 def main():
-    ap = argparse.ArgumentParser()
+    ap = _ArgParser()
     ap.add_argument("--input", "-i", required=True)
     ap.add_argument("--extra-lexicon", default="")
-    ap.add_argument("--fail-over", type=int, default=0)
+    ap.add_argument("--fail-over", type=_i64, default=0)
     a = ap.parse_args()
 
     if not os.path.isfile(a.input):  # 与 ps1 Test-Path 同口径：缺文件同文案 exit1
         print(f"❌ 文件不存在：{a.input}")
         sys.exit(1)
-    with open(a.input, encoding="utf-8-sig") as f:  # 带 BOM 输入与 ps1 ReadAllText 剥 BOM 同口径（单元数/段落一致）
+    with open(a.input, encoding="utf-8-sig", errors="replace") as f:  # 带 BOM 输入与 ps1 ReadAllText 剥 BOM 同口径；非 UTF-8 字节替换回退（对齐 ps1 UTF8.GetString）
         text = f.read()
     text = text.replace("\r\n", "\n")
     units = len(text.encode("utf-16-le")) // 2
@@ -78,9 +99,9 @@ def main():
     runs = []
     i = 0
     while i < len(sents) - 2:
-        k = sents[i][:2]
+        k = sents[i].encode("utf-16-le", "surrogatepass")[:4].decode("utf-16-le", "surrogatepass")  # UTF-16 码元前 2，保留悬空代理（对齐 ps1 Substring(0,2)）
         j = i
-        while j + 1 < len(sents) and sents[j + 1][:2] == k:
+        while j + 1 < len(sents) and sents[j + 1].encode("utf-16-le", "surrogatepass")[:4].decode("utf-16-le", "surrogatepass") == k:
             j += 1
         if j - i >= 2 and k:
             runs.append((i + 1, j + 1, k))
@@ -88,7 +109,11 @@ def main():
         else:
             i += 1
     hits_total += len(runs)
-    bdetail = "，".join(f"第{s}-{e}句同头「{k}」" for s, e, k in runs) if runs else "（无）"
+
+    def _bd(k: str) -> str:
+        # 展示层：悬空高位代理替换为 U+FFFD（对齐 ps1 控制台把 lone surrogate 渲染为 �）
+        return k.encode("utf-16-le", "surrogatepass").decode("utf-16-le", "replace")
+    bdetail = "，".join(f"第{s}-{e}句同头「{_bd(k)}」" for s, e, k in runs) if runs else "（无）"
     lines.append(f"[B] 同头连句（连续≥3句同起2字）：{len(runs)} 处 —— {bdetail}")
 
     # [C] 句长均匀

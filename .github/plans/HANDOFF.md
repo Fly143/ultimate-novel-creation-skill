@@ -50,8 +50,8 @@ ls modules modules/02_功能模块索引.md scripts/ .github/scripts/
 
 ```bash
 # 1) 现有门禁是否全绿（确认起点干净）
-python .github/scripts/test-check-done.py                # 期望全绿（2026-10-17 终态 330 项 = py/ps1 双引擎；无 pwsh 时 ps1 引擎由系统 PowerShell 5.1 承担——探测顺序 pwsh→powershell，仅当机器完全无 PowerShell 时才单跑 py）
-pwsh .github/scripts/audit.ps1 -Root . -StrictOrphan -LintTerm -LintLineRef   # -LintOrder 默认 $true，禁裸传；-File 形态勿传 $false（需关用 -Command）
+python .github/scripts/test-check-done.py                # 期望全绿（2026-10-19 终态 410 项 = py/ps1 双引擎；无 pwsh 时 ps1 引擎由系统 PowerShell 5.1 承担——探测顺序 pwsh→powershell，仅当机器完全无 PowerShell 时才单跑 py）
+pwsh .github/scripts/audit.ps1 -Root . -StrictOrphan -LintTerm -LintLineRef -LintBudget   # -LintOrder 默认 $true，禁裸传；-File 形态勿传 $false（需关用 -Command）
 
 # 2) 记录现状指标（P0-4 需要基线数据）
 python - <<'PY'
@@ -89,7 +89,7 @@ P2/P3       按需，见总案总表
 9 更新 README.md
 ```
 
-**每条都要跑**：`pwsh .github/scripts/audit.ps1 -Root . -StrictOrphan -LintTerm -LintLineRef`（`-LintOrder` 默认开启；需显式关在 `-Command`/交互式下写 `-LintOrder $false`，`-File` 形态省略）
+**每条都要跑**：`pwsh .github/scripts/audit.ps1 -Root . -StrictOrphan -LintTerm -LintLineRef -LintBudget`（`-LintOrder` 默认开启；需显式关在 `-Command`/交互式下写 `-LintOrder $false`，`-File` 形态省略）
 
 ## 五、三条不可破的约束（违反即返工）
 
@@ -107,7 +107,7 @@ P2/P3       按需，见总案总表
 | 1 | 章节任务书写在**细纲头部**还是独立文件？ | 细纲头部（少一个索引登记）**【已决：P0-2 落地，四段在细纲头部】** | P0-2 |
 | 2 | 状态单真源是否把「阶段/卷压缩」也纳入 state 派生？ | 先纳入摘要与圣经；阶段/卷保持现有手写（降低首期风险）**【已决：P0-3 按此落地】** | P0-3 |
 | 3 | `.done` 是否新增 `state.done`（12→13 项，口径 `scripts/check-done-rules.json`）？ | 是（否则状态提交无法纳入闭环校验）**【已决：已实现，13 项口径】** | P0-3 |
-| 4 | 预算上限是否直接用 oh-story 的 35000 字符？ | 先出基线，再定（可能需按本 skill 规模放宽，但必须显式记录理由）**【已决：2026-10-17 现值 48,500 = 实测 46,315 + 约4.7%（十五轮终态；十四轮 45,919、九轮 45,916、八轮 45,795、七轮 48,000/45,708、六轮 48,000/45,522、五轮 48,000/45,402、四轮 47,500/45,091、三轮 44,665、二轮 47,000/44,322），论证见 `scripts/doc-budget.json` path_ceiling.why 与实施记录§三 #1】** | P0-4 |
+| 4 | 预算上限是否直接用 oh-story 的 35000 字符？ | 先出基线，再定（可能需按本 skill 规模放宽，但必须显式记录理由）**【已决：2026-10-17 时点 48,500 = 实测 46,315 + 约4.7%（十五轮时点，现值与沿革见 doc-budget.json；十四轮 45,919、九轮 45,916、八轮 45,795、七轮 48,000/45,708、六轮 48,000/45,522、五轮 48,000/45,402、四轮 47,500/45,091、三轮 44,665、二轮 47,000/44,322），论证见 `scripts/doc-budget.json` path_ceiling.why 与实施记录§三 #1】** | P0-4 |
 | 5 | 检测器用 Node（照 oh-story）还是 Python（保持双实现）？ | Python + PowerShell 双实现，与现有脚本一致**【已决：P1-8 落地】** | P1-8 |
 | 6 | 是否做"发布包"（modules 镜像到 references 以便被 OpenFic 类系统导入）？ | 暂缓，P3-19 按需**【已决：P3-19 已做 -Check 双实现校验，zip 仅 py】** | P3-19 |
 

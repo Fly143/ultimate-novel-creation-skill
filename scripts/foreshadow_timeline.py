@@ -19,17 +19,38 @@ import re
 import sys
 from datetime import date, timedelta
 
+def _i64(s):
+    # Int64 范围收口（对齐 ps1 [long] 绑定失败 rc1 / check-doc-budget _in_i64 先例）
+    _t = str(s)
+    if not re.fullmatch(r"-?[0-9]+", _t):  # 纯 ASCII 十进制（int(…,10) 会接受下划线/非 ASCII 数字如 3_0/١٢，ps1 [long] 绑定拒绝 → 反向裁决）
+        raise argparse.ArgumentTypeError(f"非十进制整数：{s}")
+    try:
+        v = int(_t, 10)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"非十进制整数：{s}")
+    if not (-2**63 <= v < 2**63):
+        raise argparse.ArgumentTypeError(f"超出 Int64 范围：{s}")
+    return v
+
+
+class _ArgParser(argparse.ArgumentParser):
+    # 参数错误收敛 rc1 + 中文（对齐 check-done/check-doc-budget/detect；ps1 绑定失败亦 rc1）
+    def error(self, message):
+        print(f"❌ 参数错误：{message}")
+        raise SystemExit(1)
+
+
 MARK = "<!-- generated:foreshadow-timeline v1 | 派生件禁手改，重跑本脚本再生成 -->"
 SRC_NEW, SRC_OLD = "state", "清单"
 TITLE_BAD = re.compile(r"[:,：，]")
 
 
-def units(text: str) -> str:
-    return text
-
-
 def day_of(ch: int) -> str:
-    return (date(2000, 1, 1) + timedelta(days=max(ch, 1) - 1)).strftime("%Y-%m-%d")
+    d = max(ch, 1) - 1
+    if d > 2_913_088:  # date 9999-12-31 上界（2000-01-01 + 2,913,088 天）；超界双引擎同文案 rc1（不再裸 OverflowError）
+        print(f"❌ 章号超出日期换算上界：{ch}（≤2913088 才能映射到 9999 年内）")
+        sys.exit(1)
+    return (date(2000, 1, 1) + timedelta(days=d)).strftime("%Y-%m-%d")
 
 
 def digits(s: str):
@@ -48,7 +69,7 @@ def detect_current(project: str) -> int:
     st = os.path.join(project, "记忆系统", "_state.json")
     if best == 0 and os.path.exists(st):
         try:
-            with open(st, encoding="utf-8") as f:
+            with open(st, encoding="utf-8-sig") as f:
                 best = int(json.load(f).get("last_committed_chapter", 0) or 0)
         except Exception:
             best = 0
@@ -59,21 +80,51 @@ def load_state(project: str):
     p = os.path.join(project, "记忆系统", "_state.json")
     if not os.path.exists(p):
         return None
-    with open(p, encoding="utf-8") as f:
-        return json.load(f)
+    with open(p, encoding="utf-8-sig") as f:
+        try:
+            state = json.load(f)
+        except ValueError:
+            print("❌ 记忆系统/_state.json JSON 损坏（先 state_commit check 修复状态单）")
+            sys.exit(1)
+    if not isinstance(state, dict):
+        print("❌ 记忆系统/_state.json 须为对象（先 state_commit check 修复状态单）")
+        sys.exit(1)
+    return state
 
 
 def from_state(state) -> list[dict]:
     items = []
-    for fid, v in (state.get("foreshadow") or {}).items():
-        items.append({
-            "id": fid,
-            "name": str(v.get("desc", "")),
-            "planted": int(v.get("planted_ch", 0) or 0),
-            "planned": int(v.get("planned_resolve_ch", 0) or 0),
-            "resolved": int(v.get("resolved_ch") or 0),
-            "status": "resolved" if v.get("resolved_ch") else "open",
-        })
+    fs = state.get("foreshadow")
+    if fs is not None and not isinstance(fs, dict):
+        print("❌ foreshadow 须为对象（先 state_commit check 修复状态单）")
+        sys.exit(1)
+    for fid, v in (fs or {}).items():
+        if not isinstance(v, dict):
+            print(f"❌ foreshadow.{fid} 须为对象（先 state_commit check 修复状态单）")
+            sys.exit(1)
+        def _numch(x):
+            # 与 ps1 同口径：None/false/空串按 0；数值/数值串 Truncate 截断；负数钳 0（ps1 靠 -gt 0 过滤，等价）
+            if x is None or x is False or x == "":
+                return 0
+            if isinstance(x, bool):
+                raise ValueError("bool 不是章号")
+            try:
+                return max(0, int(float(x)))
+            except (TypeError, ValueError):
+                raise ValueError(f"章号不是数值：{x!r}")
+        _rs_n = _numch(v.get("resolved_ch"))
+        try:
+            items.append({
+                "id": fid,
+                "name": str(v.get("desc") or ""),  # 显式 null 与 ps1 [string]$null 渲染同为空串
+                "planted": _numch(v.get("planted_ch", 0)),
+                "planned": _numch(v.get("planned_resolve_ch", 0)),
+                "resolved": _rs_n,
+                "status": "resolved" if _rs_n > 0 else "open",
+            })
+        except ValueError as exc:
+            print(f"❌ foreshadow.{fid} 章号非法：{exc}")
+            sys.exit(1)
     return items
 
 
@@ -88,7 +139,7 @@ def split_row(line: str) -> list[str]:
 
 def from_checklist(path: str) -> list[dict]:
     items = []
-    with open(path, encoding="utf-8") as f:
+    with open(path, encoding="utf-8-sig") as f:
         lines = f.read().splitlines()
     header = None
     idx = {}
@@ -108,7 +159,7 @@ def from_checklist(path: str) -> list[dict]:
                 idx = {}
                 for i, c in enumerate(cells):
                     if "伏笔" in c:
-                        idx["name"] = i
+                        idx.setdefault("name", i)
                     elif c.startswith("首现"):
                         idx.setdefault("first", i)
                     elif c == "状态":
@@ -149,9 +200,9 @@ GANTT_TAG = {"resolved": "done", "near": "active", "open": ""}
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser()
+    ap = _ArgParser()
     ap.add_argument("--project", "-p", required=True)
-    ap.add_argument("--current-ch", type=int, default=0)
+    ap.add_argument("--current-ch", type=_i64, default=0)
     a = ap.parse_args()
     proj = a.project
 
@@ -167,7 +218,7 @@ def main() -> int:
         items = from_checklist(cl)
         src = SRC_OLD
 
-    current = a.current_ch or detect_current(proj)
+    current = (a.current_ch if a.current_ch and a.current_ch > 0 else 0) or detect_current(proj)  # 负数视为未传（对齐 ps1 -le 0）
     items.sort(key=lambda x: (x["planted"], x["id"]))
 
     overdue = [i for i in items if i["status"] in ("open", "near") and i["planned"] and current > i["planned"]]

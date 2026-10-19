@@ -14,19 +14,41 @@
 param(
     [Parameter(Mandatory = $true)][ValidateSet('digest', 'verify', 'verify-all')][string]$Command,
     [Parameter(Mandatory = $true)][string]$Project,
-    [long]$Chapter = 0
+    [string]$Chapter = '0'
 )
+# 参数错误收敛：纯 ASCII 十进制（[long] 会把 "1e3"/"+5"/"0x10"/" 5"/"" 静默转换，与 py _i64 反向裁决）
+if ($Chapter -notmatch '^-?[0-9]+$') { [Console]::Out.WriteLine('❌ 参数错误：章节号须为纯 ASCII 十进制整数（对齐 py _i64）'); exit 1 }
+$ChapterRaw = $Chapter  # param([string]) 类型约束会把赋值回炉成 String，先存原值再解约束重赋
+Remove-Variable -Name Chapter -Force -ErrorAction SilentlyContinue
+$Chapter = [long]$ChapterRaw
+
 $ErrorActionPreference = 'Stop'
 try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catch {}
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 
 $rulesPath = Join-Path $scriptDir 'check-done-rules.json'
-$rules = [System.IO.File]::ReadAllText($rulesPath, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
-$globs = @($rules.body_globs)
+$script:globs = $null
+function Get-BodyGlobs {
+    # 惰性加载（对齐 py body_globs()：verify-all 空账本不触碰规则单源，同输入同 rc）
+    if ($null -ne $script:globs) { return $script:globs }
+    if (-not (Test-Path -LiteralPath $rulesPath -PathType Leaf)) {
+        [Console]::Out.WriteLine(("❌ 缺少规则单源：{0}" -f $rulesPath)); exit 1
+    }
+    try {
+        $rulesObj = [System.IO.File]::ReadAllText($rulesPath, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+    } catch {
+        [Console]::Out.WriteLine(("❌ 规则单源解析失败：{0}" -f $rulesPath)); exit 1
+    }
+    if ($null -eq $rulesObj -or $rulesObj -isnot [pscustomobject] -or $rulesObj.GetType().FullName -ne 'System.Management.Automation.PSCustomObject' -or $null -eq $rulesObj.PSObject.Properties['body_globs']) {
+        [Console]::Out.WriteLine(("❌ 规则单源解析失败：{0}（须为含 body_globs 的 JSON 对象）" -f $rulesPath)); exit 1  # 对齐 py 判型（原 ps1 静默空 globs → rc2 误导「正文未找到」）
+    }
+    $script:globs = @($rulesObj.body_globs)
+    return $script:globs
+}
 
 function Find-Body([string]$proj, [long]$ch) {
     $nnn = '{0:D3}' -f $ch
-    foreach ($g in $globs) {
+    foreach ($g in (Get-BodyGlobs)) {
         $relPat = $g.Replace('{nnn}', $nnn).Replace('{ch}', "$ch")
         $dirRel = (Split-Path $relPat -Parent).Replace('\', '/')
         $name = Split-Path $relPat -Leaf
@@ -53,7 +75,14 @@ function Get-Short([string]$sha) { return $sha.Substring(0, 12) }
 
 $ledgerPath = Join-Path $Project '.story/text-digests.json'
 if (Test-Path -LiteralPath $ledgerPath) {
-    $ledger = [System.IO.File]::ReadAllText($ledgerPath, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+    try {
+        $ledger = [System.IO.File]::ReadAllText($ledgerPath, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+    } catch {
+        [Console]::Out.WriteLine(("❌ 账本 JSON 损坏：{0}（可删 .story/text-digests.json 重新 digest 生成）" -f $ledgerPath)); exit 1  # 对齐 py
+    }
+    if ($null -eq $ledger -or $ledger -isnot [pscustomobject] -or $ledger.GetType().FullName -ne 'System.Management.Automation.PSCustomObject') {
+        [Console]::Out.WriteLine(("❌ 账本须为 JSON 对象：{0}（顶层非对象，如数组/标量）" -f $ledgerPath)); exit 1  # 对齐 py 判型（原误判「无记录」rc2 会诱导重跑 digest 覆盖账本）
+    }
 } else {
     $ledger = [pscustomobject]@{ version = 1; chapters = [pscustomobject]@{} }
 }

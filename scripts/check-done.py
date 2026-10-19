@@ -35,6 +35,20 @@ from pathlib import Path
 RULES_PATH = Path(__file__).resolve().parent / "check-done-rules.json"
 
 
+def _i64(s):
+    # Int64 范围收口（对齐 ps1 [long] 绑定失败 rc1 / check-doc-budget _in_i64 先例）
+    _t = str(s)
+    if not re.fullmatch(r"-?[0-9]+", _t):  # 纯 ASCII 十进制（int(…,10) 会接受下划线/非 ASCII 数字如 3_0/١٢，ps1 [long] 绑定拒绝 → 反向裁决）
+        raise argparse.ArgumentTypeError(f"非十进制整数：{s}")
+    try:
+        v = int(_t, 10)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"非十进制整数：{s}")
+    if not (-2**63 <= v < 2**63):
+        raise argparse.ArgumentTypeError(f"超出 Int64 范围：{s}")
+    return v
+
+
 class _ArgParser(argparse.ArgumentParser):
     """退出码契约仅 0/1（与 check-done.ps1 参数绑定失败=1 对齐）：用法错误也走 1。"""
 
@@ -130,24 +144,41 @@ def load_rules() -> dict:
     return rules
 
 
-RULES = load_rules()
-BASE_MARKS: list[str] = list(RULES["base_marks"])
-EVIDENCE_RULES: list[tuple[str, str, bool]] = [
-    (r["name"], r["pattern"], bool(r["strong"])) for r in RULES["evidence_rules"]
-]
-SECTION_TITLE: str = RULES["section_title"]
-MIN_HITS: int = int(RULES["min_hits"])
-REQUIRE_STRONG: bool = bool(RULES["require_strong"])
-CLAIM_PARA_RE: re.Pattern[str] = re.compile(RULES["claim_para_pattern"])
-STATE_MARK: dict = RULES.get("state_mark", {})
-BODY_GLOBS: list[str] = list(RULES["body_globs"])
+# 惰性加载（对齐 ps1:65→70→78 顺序：项目目录 → .done → 规则单源；导入期不加载，复合故障首条归因与 ps1 一致）
+RULES: dict = {}
+BASE_MARKS: list[str] = []
+EVIDENCE_RULES: list[tuple[str, str, bool]] = []
+SECTION_TITLE: str = ""
+MIN_HITS: int = 0
+REQUIRE_STRONG: bool = False
+CLAIM_PARA_RE: re.Pattern[str] | None = None
+STATE_MARK: dict = {}
+BODY_GLOBS: list[str] = []
 
-# 章节任务书结构门禁（P0-2）
-TASK_SHEET: dict = RULES["task_sheet"]
-TASK_DIRS: list[str] = list(TASK_SHEET["dirs"])
-TASK_SUFFIX: str = TASK_SHEET["suffix"]
-TASK_SECTIONS: list[str] = list(TASK_SHEET["required_sections"])
-TASK_ITEM_MARK: str = TASK_SHEET["required_item_mark"]
+
+def _init_rules() -> None:
+    global RULES, BASE_MARKS, EVIDENCE_RULES, SECTION_TITLE, MIN_HITS, REQUIRE_STRONG, CLAIM_PARA_RE, STATE_MARK, BODY_GLOBS, TASK_SHEET, TASK_DIRS, TASK_SUFFIX, TASK_SECTIONS, TASK_ITEM_MARK
+    RULES = load_rules()
+    BASE_MARKS = list(RULES["base_marks"])
+    EVIDENCE_RULES = [(r["name"], r["pattern"], bool(r["strong"])) for r in RULES["evidence_rules"]]
+    SECTION_TITLE = RULES["section_title"]
+    MIN_HITS = int(RULES["min_hits"])
+    REQUIRE_STRONG = bool(RULES["require_strong"])
+    CLAIM_PARA_RE = re.compile(RULES["claim_para_pattern"])
+    STATE_MARK = RULES.get("state_mark", {})
+    BODY_GLOBS = list(RULES["body_globs"])
+    TASK_SHEET = RULES["task_sheet"]
+    TASK_DIRS = list(TASK_SHEET["dirs"])
+    TASK_SUFFIX = TASK_SHEET["suffix"]
+    TASK_SECTIONS = list(TASK_SHEET["required_sections"])
+    TASK_ITEM_MARK = TASK_SHEET["required_item_mark"]
+
+# 章节任务书结构门禁（P0-2）——同为规则单源派生，随 _init_rules 惰性加载
+TASK_SHEET: dict = {}
+TASK_DIRS: list[str] = []
+TASK_SUFFIX: str = ""
+TASK_SECTIONS: list[str] = []
+TASK_ITEM_MARK: str = ""
 
 
 def required_marks(chapter: int) -> list[str]:
@@ -261,18 +292,30 @@ def find_body(project: Path, nnn: str, chapter: int) -> Path | None:
     body_dir = project / "正文"
     if not body_dir.is_dir():
         return None
+    def _guard_dir(cands) -> Path | None:
+        # 目录冒充正文 → 双引擎同文案 rc1（对 ps1:30「目录当报告等场景不得 exit0 放行」纪律）
+        for p in cands:
+            if p.is_dir():
+                print(f"❌ 正文交叉校验：正文候选路径是目录（应为 .txt 文件）：{p}")
+                raise SystemExit(1)
+        return None
     for glob in BODY_GLOBS:
         pattern = glob.format(nnn=nnn, ch=chapter)
         # 排序取首个：文件系统 glob 顺序不定，与 ps1 的 Sort-Object Name 对齐
-        for p in sorted(body_dir.parent.glob(pattern.replace("\\", "/"))):
+        _c1 = sorted(body_dir.parent.glob(pattern.replace("\\", "/")))
+        _guard_dir(_c1)
+        for p in _c1:
             if p.is_file():
                 return p
-        for p in sorted(body_dir.glob(Path(pattern).name)):
+        _c2 = sorted(body_dir.glob(Path(pattern).name))
+        _guard_dir(_c2)
+        for p in _c2:
             if p.is_file():
                 return p
     # 兜底：前缀匹配
     for prefix in (f"第{nnn}章", f"第{chapter}章"):
         matches = sorted(body_dir.glob(f"{prefix}*.txt"))
+        _guard_dir(matches)
         if matches:
             return matches[0]
     return None
@@ -444,7 +487,7 @@ def check_task_sheet(
 def main() -> int:
     parser = _ArgParser(description="核验第 N 章写后流水线 .done 空标记")
     parser.add_argument("-p", "--project", required=True, help="项目（书名）目录")
-    parser.add_argument("-c", "--chapter", required=True, type=int, help="章节号，如 12")
+    parser.add_argument("-c", "--chapter", required=True, type=_i64, help="章节号，如 12")
     parser.add_argument(
         "--no-chapter-done",
         action="store_true",
@@ -497,6 +540,8 @@ def main() -> int:
     if not done_dir.is_dir():
         print(f"❌ 缺少 .done 目录：{done_dir}（项目可能未初始化写后流水线）")
         return 1
+
+    _init_rules()  # 规则单源在项目/.done 检查后加载（对齐 ps1 诊断顺序）
 
     nnn = f"{chapter:03d}"
     required = required_marks(chapter)
@@ -560,10 +605,12 @@ def main() -> int:
     print(f"报告校验：{report_status}（{report_mode}）")
     if state_on and STATE_MARK.get("require_last_committed", True):
         try:
-            with state_file.open(encoding="utf-8") as fh:
+            with state_file.open(encoding="utf-8-sig") as fh:
                 _st = json.load(fh)
-            _last = _st.get("last_committed_chapter")
-            if not (isinstance(_last, int) and not isinstance(_last, bool)):
+            # 顶层非对象（数组/标量）→ 与 last_committed 缺失同文案（中文兜底，不裸崩）
+            _last = _st.get("last_committed_chapter") if isinstance(_st, dict) else None
+            if not (isinstance(_last, int) and not isinstance(_last, bool)
+                    and -(2 ** 63) <= _last < 2 ** 63):
                 state_errs.append(f"状态单校验：last_committed_chapter 不是整数 → {state_file}")
             elif _last < chapter:
                 state_errs.append(

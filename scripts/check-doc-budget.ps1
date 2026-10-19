@@ -250,7 +250,7 @@ foreach ($item in @($rules.files)) {
     $refM = [string]$item.path
     if ([string]::IsNullOrEmpty($refM)) { continue }
     $mM = Measure-Ref -RootDir $Root -Ref $refM
-    if ($null -ne $mM.Value -and [long]$mM.Value -gt $maxSingleVal) { $maxSingleRef = $refM; $maxSingleVal = [long]$mM.Value }
+    if ($null -ne $mM.Value -and [long]$mM.Value -gt $maxSingleVal) { $maxSingleRef = (([string]$refM).Split('#'))[0].Trim($wsChars); $maxSingleVal = [long]$mM.Value }
 }
 $layerParts = @()
 foreach ($k in $validLayers) { $layerParts += ("{0} {1}" -f $k, $layerCounts[$k]) }
@@ -314,28 +314,65 @@ foreach ($path in @($rules.paths)) {
     Write-Output ("  {0} {1} {2:N0}/{3:N0}（{4}）" -f $flag, $label, $total, $limit, ($detail -join ' '))
 }
 
-# 基线防漂移闸：baseline 五字段须与实测一致（改文档后必须回填，禁止静默过期）
+# 非法基线值展示归一（与 py _bl_disp 口径对齐）
+function Convert-BLDisp {
+    param($V)
+    if ($null -eq $V) { return '' }
+    if ($V -is [System.Numerics.BigInteger]) { return ([double]$V).ToString('G15', [System.Globalization.CultureInfo]::InvariantCulture).ToUpperInvariant() }
+    if ($V -is [double] -or $V -is [decimal]) { return (([double]$V).ToString('G15', [System.Globalization.CultureInfo]::InvariantCulture).ToUpperInvariant() -replace '^-0$', '0') }
+    if ($V -is [array] -or $V -is [pscustomobject]) { return (ConvertTo-Json -InputObject $V -Compress -Depth 100) }
+    return [string]$V
+}
+# 基线防漂移闸：baseline 五字段须与实测一致（改文档后必须回填，禁止静默过期）；缺键/换型一律 fail-closed
 $bl = $null
-if ($null -ne $rules.PSObject.Properties['baseline'] -and $null -ne $rules.baseline) { $bl = $rules.baseline }
-if ($null -ne $bl) {
-    if ($null -ne $bl.PSObject.Properties['worst_path_chars'] -and $bl.worst_path_chars -is [int] -and $bl.worst_path_chars -isnot [bool] -and [long]$bl.worst_path_chars -ne [long]$worst) {
-        $script:errors += ("基线过期：baseline.worst_path_chars={0:N0} ≠ 实测 {1:N0}（改文档后回填 doc-budget.json baseline）" -f [long]$bl.worst_path_chars, [long]$worst)
+if ($null -ne $rules.PSObject.Properties['baseline']) { $bl = $rules.baseline }
+if ($null -eq $bl -or $bl -isnot [pscustomobject]) {
+    $script:errors += '基线非法：baseline 块缺失或非对象（须含 worst/writer/resident/precheck/max_single 五字段）'
+} else {
+    foreach ($kMiss in @('worst_path_chars','writer_delegated_chars','session_resident_chars','precheck_path_chars','max_single_file')) {
+        if ($null -eq $bl.PSObject.Properties[$kMiss]) { $script:errors += ("基线缺键：baseline.{0}（五字段必须齐全）" -f $kMiss) }
     }
-    foreach ($lblB in @(@('写一章·写手委派','writer_delegated_chars'), @('主会话常驻（入口+协议+索引）','session_resident_chars'), @('写前预检','precheck_path_chars'))) {
-        $keyB = [string]$lblB[1]
-        if ($null -ne $bl.PSObject.Properties[$keyB] -and $bl.PSObject.Properties[$keyB].Value -is [int] -and $bl.PSObject.Properties[$keyB].Value -isnot [bool] -and $pathTotals.ContainsKey([string]$lblB[0]) -and [long]$bl.PSObject.Properties[$keyB].Value -ne [long]$pathTotals[[string]$lblB[0]]) {
-            $script:errors += ("基线过期：baseline.{0}={1:N0} ≠ 实测 {2:N0}（改文档后回填 doc-budget.json baseline）" -f $keyB, [long]$bl.PSObject.Properties[$keyB].Value, [long]$pathTotals[[string]$lblB[0]])
+    # PS7 ConvertFrom-Json 整型为 Int64、PS5.1 为 Int32——int/long 双收，避免版本性漏闸（R18 修复）
+    if ($null -ne $bl.PSObject.Properties['worst_path_chars']) {
+        $wvB = $bl.PSObject.Properties['worst_path_chars'].Value
+        if (-not ($wvB -is [int] -or $wvB -is [long])) {
+            $wvS = Convert-BLDisp $wvB
+            $script:errors += ("基线非法：baseline.worst_path_chars={0}（应为整数，非整型值会绕过过期闸——fail-closed）" -f $wvS)
+        } elseif ([long]$wvB -ne [long]$worst) {
+            $script:errors += ("基线过期：baseline.worst_path_chars={0:N0} ≠ 实测 {1:N0}（改文档后回填 doc-budget.json baseline）" -f [long]$wvB, [long]$worst)
         }
     }
-    if ($null -ne $bl.PSObject.Properties['max_single_file'] -and $bl.max_single_file -is [string] -and $bl.max_single_file.Contains('=')) {
-        $msfStr = [string]$bl.max_single_file
-        $eqIdx = $msfStr.LastIndexOf('=')
-        $snPart = $msfStr.Substring($eqIdx + 1)
-        $snVal = 0L
-        if (-not [long]::TryParse($snPart, [ref]$snVal)) {
-            $script:errors += ("基线非法：baseline.max_single_file={0}（应为 path=整数）" -f $msfStr)
-        } elseif ($snVal -ne [long]$maxSingleVal) {
-            $script:errors += ("基线过期：baseline.max_single_file={0} ≠ 实测 {1}={2:N0}（改文档后回填 doc-budget.json baseline）" -f $msfStr, $maxSingleRef, [long]$maxSingleVal)
+    # 根因：PS7 ConvertFrom-Json 整型为 Int64、判型若写死 -is [int] 会静默漏闸（R18 实测确认；分隔串仅为防御性收敛写法，7.4.6 实测并不拍平该嵌套数组）
+    foreach ($pairB in @('写一章·写手委派|writer_delegated_chars','主会话常驻（入口+协议+索引）|session_resident_chars','写前预检|precheck_path_chars')) {
+        $partsB = [string]$pairB -split '\|'
+        $lblB = $partsB[0]
+        $keyB = $partsB[1]
+        if ($null -ne $bl.PSObject.Properties[$keyB]) {
+            $kvB = $bl.PSObject.Properties[$keyB].Value
+            if (-not ($kvB -is [int] -or $kvB -is [long])) {
+                $kvS = Convert-BLDisp $kvB
+                $script:errors += ("基线非法：baseline.{0}={1}（应为整数，非整型值会绕过过期闸——fail-closed）" -f $keyB, $kvS)
+            } elseif ($pathTotals.ContainsKey([string]$lblB) -and [long]$kvB -ne [long]$pathTotals[[string]$lblB]) {
+                $script:errors += ("基线过期：baseline.{0}={1:N0} ≠ 实测 {2:N0}（改文档后回填 doc-budget.json baseline）" -f $keyB, [long]$kvB, [long]$pathTotals[[string]$lblB])
+            }
+        }
+    }
+    if ($null -ne $bl.PSObject.Properties['max_single_file']) {
+        $msfRaw = $bl.PSObject.Properties['max_single_file'].Value
+        if ($msfRaw -isnot [string] -or -not ([string]$msfRaw).Contains('=')) {
+            $script:errors += ("基线非法：baseline.max_single_file={0}（应为 path=整数）" -f (Convert-BLDisp $msfRaw))
+        } else {
+            $msfStr = [string]$msfRaw
+            $eqIdx = $msfStr.LastIndexOf('=')
+            $snPart = $msfStr.Substring($eqIdx + 1)
+            $snVal = 0L
+            if ($snPart -notmatch '^\A-?[0-9]+\z') {
+                $script:errors += ("基线非法：baseline.max_single_file={0}（应为 path=整数）" -f $msfStr)
+            } elseif (-not [long]::TryParse($snPart, [ref]$snVal)) {
+                $script:errors += ("基线非法：baseline.max_single_file={0}（应为 path=整数）" -f $msfStr)
+            } elseif (($msfStr.Substring(0, $eqIdx)) -ne [string]$maxSingleRef -or $snVal -ne [long]$maxSingleVal) {
+                $script:errors += ("基线过期：baseline.max_single_file={0} ≠ 实测 {1}={2:N0}（路径段须为实测最大单文件名；改文档后回填 doc-budget.json baseline）" -f $msfStr, $maxSingleRef, [long]$maxSingleVal)
+            }
         }
     }
 }

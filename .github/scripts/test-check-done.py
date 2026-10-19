@@ -10,6 +10,7 @@ from __future__ import annotations
 import atexit
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -92,6 +93,8 @@ def run_ps1(project: Path, chapter: int, *extra: str) -> tuple[int, str]:
     proc = subprocess.run(
         [
             PS_RUNNER,
+            "-ExecutionPolicy",
+            "Bypass",
             "-NoProfile",
             "-File",
             str(PS1),
@@ -107,7 +110,16 @@ def run_ps1(project: Path, chapter: int, *extra: str) -> tuple[int, str]:
     return proc.returncode, _decode(proc.stdout) + _decode(proc.stderr)
 
 
+LAST_RUN: dict = {}
+
+
 def run(project: Path, chapter: int, *extra: str, engine: str = "py") -> tuple[int, str]:
+    _res = _run_impl(project, chapter, *extra, engine=engine)
+    LAST_RUN["v"] = _res
+    return _res
+
+
+def _run_impl(project: Path, chapter: int, *extra: str, engine: str = "py") -> tuple[int, str]:
     if engine == "ps1":
         return run_ps1(project, chapter, *extra)
     return run_py(project, chapter, *extra)
@@ -127,10 +139,16 @@ def check_engines_case(name: str, ok: bool, fn) -> list[bool]:
 
 STATE_PY = ROOT / "scripts" / "state_commit.py"
 STATE_PS1 = ROOT / "scripts" / "state_commit.ps1"
-STATE_ENGINES = ["py", "ps1"] if PS_RUNNER else ["py"]
+STATE_ENGINES = ["py", "ps1"]  # main() 强制 ps1 在场（缺则 rc1）；下方 [SKIP] 未检测到 PowerShell 分支为历史回退，现不可达 if PS_RUNNER else ["py"]
 
 
 def run_state(engine: str, command: str, *args: str) -> tuple[int, str]:
+    _res = _run_state_impl(engine, command, *args)
+    LAST_RUN["v"] = _res
+    return _res
+
+
+def _run_state_impl(engine: str, command: str, *args: str) -> tuple[int, str]:
     """调用 state_commit（命令与 flag 分离：py 用 --flag，ps1 用 -Command/-Flag）。"""
     if engine == "ps1":
         mapped: list[str] = ["-Command", command]
@@ -140,7 +158,7 @@ def run_state(engine: str, command: str, *args: str) -> tuple[int, str]:
             flag = {"--project": "-Project", "--chapter": "-Chapter", "--input": "-InputFile"}.get(a, a)
             mapped += [flag, val]
         proc = subprocess.run(
-            [PS_RUNNER, "-NoProfile", "-File", str(STATE_PS1), *mapped],
+            [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(STATE_PS1), *mapped],
             capture_output=True,
             env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         )
@@ -314,6 +332,10 @@ OVERCLAIM_REPORT = (
 
 
 def case(name: str, ok: bool, cond: bool, detail: str = "") -> bool:
+    if cond != ok and os.environ.get("SUITE_DEBUG") and "LAST" not in detail:
+        _lr = LAST_RUN.get("v")
+        if _lr:
+            detail = f"{detail} | last_rc={_lr[0]} last_out={_lr[1][-260:]}"
     status = "PASS" if cond == ok else "FAIL"
     print(f"  [{status}] {name}{(' — ' + detail) if detail and not cond else ''}")
     return cond == ok
@@ -765,7 +787,7 @@ def _run(results: list[bool]) -> int:
 
         def _detect(engine: str, txt: Path):
             if engine == "ps1":
-                cmd = [PS_RUNNER, "-NoProfile", "-File", str(DETECT_PS1), "-InputFile", str(txt)]
+                cmd = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(DETECT_PS1), "-InputFile", str(txt)]
             else:
                 cmd = [PY, str(DETECT_PY), "--input", str(txt)]
             proc = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
@@ -788,10 +810,10 @@ def _run(results: list[bool]) -> int:
             _cs2, _os2 = _detect("ps1", _clean_txt)
             results.append(case("[detect] 干净样例 py/ps1 输出逐字节一致", True, _cp2 == _cs2 and _op2 == _os2))
             _p = subprocess.run([PY, str(DETECT_PY), "--input", str(_ai_txt), "--fail-over", "3"], capture_output=True)
-            _s = subprocess.run([PS_RUNNER, "-NoProfile", "-File", str(DETECT_PS1), "-InputFile", str(_ai_txt), "-FailOver", "3"], capture_output=True)
+            _s = subprocess.run([PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(DETECT_PS1), "-InputFile", str(_ai_txt), "-FailOver", "3"], capture_output=True)
             results.append(case("[detect] fail-over 3（命中≥3）→ 双实现 exit1", True, _p.returncode == 1 and _s.returncode == 1))
             _p = subprocess.run([PY, str(DETECT_PY), "--input", str(_ai_txt), "--fail-over", "999"], capture_output=True)
-            _s = subprocess.run([PS_RUNNER, "-NoProfile", "-File", str(DETECT_PS1), "-InputFile", str(_ai_txt), "-FailOver", "999"], capture_output=True)
+            _s = subprocess.run([PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(DETECT_PS1), "-InputFile", str(_ai_txt), "-FailOver", "999"], capture_output=True)
             results.append(case("[detect] fail-over 999（不可达）→ 双实现 exit0", True, _p.returncode == 0 and _s.returncode == 0))
         else:
             print("  [SKIP] [detect] 跨引擎对拍 4 项 — 未检测到 PowerShell")
@@ -816,7 +838,7 @@ def _run(results: list[bool]) -> int:
 
         def _guard(engine: str, command: str, pj: Path, ch: int):
             if engine == "ps1":
-                cmd = [PS_RUNNER, "-NoProfile", "-File", str(GUARD_PS1), "-Command", command, "-Project", str(pj), "-Chapter", str(ch)]
+                cmd = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(GUARD_PS1), "-Command", command, "-Project", str(pj), "-Chapter", str(ch)]
             else:
                 cmd = [PY, str(GUARD_PY), command, "--project", str(pj), "--chapter", str(ch)]
             proc = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
@@ -865,7 +887,7 @@ def _run(results: list[bool]) -> int:
         PKG_PS1 = ROOT / "scripts" / "package_skill.ps1"
         _pa = subprocess.run([PY, str(PKG_PY), "--check"], capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
         if PS_RUNNER:
-            _pb = subprocess.run([PS_RUNNER, "-NoProfile", "-File", str(PKG_PS1), "-Check"], capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+            _pb = subprocess.run([PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(PKG_PS1), "-Check"], capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
             results.append(case("[pkg] --check/-Check 双实现 exit0 且输出逐字节一致", True,
                                 _pa.returncode == 0 and _pb.returncode == 0 and _pa.stdout == _pb.stdout))
         else:
@@ -876,7 +898,7 @@ def _run(results: list[bool]) -> int:
         _na = subprocess.run([PY, str(PKG_PY), "--check", "--root", str(_pkg_dir)], capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
         _ta = (_na.stdout + _na.stderr).decode("utf-8", "replace")
         if PS_RUNNER:
-            _nb = subprocess.run([PS_RUNNER, "-NoProfile", "-File", str(PKG_PS1), "-Check", "-Root", str(_pkg_dir)], capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+            _nb = subprocess.run([PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(PKG_PS1), "-Check", "-Root", str(_pkg_dir)], capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
             _tb = (_nb.stdout + _nb.stderr).decode("utf-8", "replace")
             results.append(case("[pkg] frontmatter 缺 version → 双实现 exit1 且输出一致", True,
                                 _na.returncode == 1 and _nb.returncode == 1 and _ta == _tb and "缺字段" in _ta and "version" in _ta))
@@ -887,7 +909,7 @@ def _run(results: list[bool]) -> int:
         _nab = subprocess.run([PY, str(PKG_PY), "--check", "--root", str(_pkg_dir)], capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
         _outb = (_nab.stdout).decode("utf-8", "replace")
         if PS_RUNNER:
-            _nbb = subprocess.run([PS_RUNNER, "-NoProfile", "-File", str(PKG_PS1), "-Check", "-Root", str(_pkg_dir)], capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+            _nbb = subprocess.run([PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(PKG_PS1), "-Check", "-Root", str(_pkg_dir)], capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
             _outb2 = (_nbb.stdout).decode("utf-8", "replace")
             results.append(case("[修复] pkg SKILL.md 带 BOM → 双实现解析放行 exit0 且输出一致（🟠 回归）", True,
                                 _nab.returncode == 0 and _nbb.returncode == 0 and _outb == _outb2 and "version=1.0.0" in _outb))
@@ -954,7 +976,7 @@ def _run(results: list[bool]) -> int:
 
         def _fs_run(engine: str, pj: Path):
             if engine == "ps1":
-                cmd = [PS_RUNNER, "-NoProfile", "-File", str(FS_PS1), "-Project", str(pj)]
+                cmd = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(FS_PS1), "-Project", str(pj)]
             else:
                 cmd = [PY, str(FS_PY), "--project", str(pj)]
             proc = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
@@ -1130,7 +1152,7 @@ def _run(results: list[bool]) -> int:
 
         def _run_copy(d: Path, proj: Path, engine: str, extra: tuple[str, ...] = ()) -> tuple[int, str]:
             if engine == "ps1":
-                cmd = [PS_RUNNER, "-NoProfile", "-File", str(d / "check-done.ps1"),
+                cmd = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(d / "check-done.ps1"),
                        "-Project", str(proj), "-Chapter", "1"] + list(extra)
                 proc = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
                 return proc.returncode, _decode(proc.stdout) + _decode(proc.stderr)
@@ -1202,7 +1224,7 @@ def _run(results: list[bool]) -> int:
 
         def _bd_run(engine: str) -> tuple[int, str]:
             if engine == "ps1":
-                cmd = [PS_RUNNER, "-NoProfile", "-File", str(_bd / "check-doc-budget.ps1"), "-Root", str(_bd)]
+                cmd = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(_bd / "check-doc-budget.ps1"), "-Root", str(_bd)]
                 proc = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
                 return proc.returncode, _decode(proc.stdout) + _decode(proc.stderr)
             cmd = [PY, str(_bd / "check-doc-budget.py"), "--root", str(_bd)]
@@ -1235,7 +1257,7 @@ def _run(results: list[bool]) -> int:
     }, ensure_ascii=False, indent=2), encoding="utf-8")
     def _m5_run(engine: str) -> tuple[int, str]:
         if engine == "ps1":
-            cmd = [PS_RUNNER, "-NoProfile", "-File", str(_m5d / "check-doc-budget.ps1"), "-Root", str(_m5d)]
+            cmd = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(_m5d / "check-doc-budget.ps1"), "-Root", str(_m5d)]
         else:
             cmd = [PY, str(_m5d / "check-doc-budget.py"), "--root", str(_m5d)]
         proc = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
@@ -1257,12 +1279,15 @@ def _run(results: list[bool]) -> int:
         "paths": [{"label": "路径S", "files": "A.md", "branches": "B.md", "stacking": "B.md"}],
         "generated": "G.md",
         "path_ceiling": {"limit": 100000, "exempt": "路径S", "why": "t"},
+        "baseline": {"worst_path_chars": 0, "writer_delegated_chars": 0,
+                     "session_resident_chars": 0, "precheck_path_chars": 0,
+                     "max_single_file": "A.md=80", "measured_on": "2026-10-18"},
         "context_layers": {"protected": "p", "compressible": "c", "why": "w"}
     }, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def _bud_run(d: Path, engine: str) -> tuple[int, str]:
         if engine == "ps1":
-            cmd = [PS_RUNNER, "-NoProfile", "-File", str(d / "check-doc-budget.ps1"), "-Root", str(d)]
+            cmd = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(d / "check-doc-budget.ps1"), "-Root", str(d)]
             proc = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
             return proc.returncode, _decode(proc.stdout) + _decode(proc.stderr)
         cmd = [PY, str(d / "check-doc-budget.py"), "--root", str(d)]
@@ -1349,6 +1374,9 @@ def _run(results: list[bool]) -> int:
         "files": [{"path": "片段.md#标题", "budget": 10, "why": "小节切片", "layer": "protected"}],
         "paths": [],
         "path_ceiling": {"limit": 100000, "exempt": [], "why": "t"},
+        "baseline": {"worst_path_chars": 0, "writer_delegated_chars": 0,
+                     "session_resident_chars": 0, "precheck_path_chars": 0,
+                     "max_single_file": "片段.md=7", "measured_on": "2026-10-18"},
         "context_layers": {"protected": "p", "compressible": "c", "why": "w"}
     }, ensure_ascii=False, indent=2), encoding="utf-8")
     _r_fsec = {e: _bud_run(_fsec, e) for e in ENGINES}
@@ -1422,7 +1450,7 @@ def _run(results: list[bool]) -> int:
         if engine == "py":
             cmd = [PY, str(d / "check-done.py"), "--project", str(proj), "--chapter", "1"]
         else:
-            cmd = [PS_RUNNER, "-NoProfile", "-File", str(d / "check-done.ps1"), "-Project", str(proj), "-Chapter", "1"]
+            cmd = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(d / "check-done.ps1"), "-Project", str(proj), "-Chapter", "1"]
         pr = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
         # 主行对拍只比 stdout（解析详情 stderr 属引擎各自文案，与预算侧口径一致）
         return pr.returncode, _decode(pr.stdout)
@@ -1482,6 +1510,9 @@ def _run(results: list[bool]) -> int:
         "files": [{"path": "A.md", "budget": 100000, "why": "t", "layer": "protected"}],
         "paths": [],
         "path_ceiling": {"limit": 100000, "exempt": [], "why": "t"},
+        "baseline": {"worst_path_chars": 0, "writer_delegated_chars": 0,
+                     "session_resident_chars": 0, "precheck_path_chars": 0,
+                     "max_single_file": "A.md=50", "measured_on": "2026-10-18"},
         "context_layers": {"protected": "p", "compressible": "c", "why": "w"},
     }, ensure_ascii=False)
 
@@ -1503,7 +1534,7 @@ def _run(results: list[bool]) -> int:
         if engine == "py":
             cmd = [PY, str(d / "check-doc-budget.py"), "--root", str(d)]
         else:
-            cmd = [PS_RUNNER, "-NoProfile", "-File", str(d / "check-doc-budget.ps1"), "-Root", str(d)]
+            cmd = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(d / "check-doc-budget.ps1"), "-Root", str(d)]
         pr = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
         return pr.returncode, _decode(pr.stdout)
 
@@ -1540,7 +1571,7 @@ def _run(results: list[bool]) -> int:
         if engine == "py":
             cmd = [PY, str(_bdir2 / "check-doc-budget.py"), "--root", "."]
         else:
-            cmd = [PS_RUNNER, "-NoProfile", "-File", str(_bdir2 / "check-doc-budget.ps1"), "-Root", "."]
+            cmd = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(_bdir2 / "check-doc-budget.ps1"), "-Root", "."]
         pr = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"}, cwd=str(_bdir2))
         return pr.returncode, _decode(pr.stdout)  # 口径统一：仅 stdout（5.1 stderr 含 CategoryInfo 多行会假红）
 
@@ -1589,7 +1620,7 @@ def _run(results: list[bool]) -> int:
         if engine == "py":
             cmd = [PY, str(STATE_PY), "migrate", "--project", str(proj)] + (["--apply"] if apply else [])
         else:
-            cmd = [PS_RUNNER, "-NoProfile", "-File", str(STATE_PS1), "-Command", "migrate", "-Project", str(proj)] + (["-Apply"] if apply else [])
+            cmd = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(STATE_PS1), "-Command", "migrate", "-Project", str(proj)] + (["-Apply"] if apply else [])
         pr = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
         return pr.returncode, _decode(pr.stdout) + _decode(pr.stderr)
 
@@ -1637,7 +1668,7 @@ def _run(results: list[bool]) -> int:
             if e == "py":
                 cmd = [PY, str(ROOT / "scripts" / "fingerprint.py"), str(f)]
             else:
-                cmd = [PS_RUNNER, "-NoProfile", "-File", str(ROOT / "scripts" / "fingerprint.ps1"), "-Path", str(f), "-Json"]
+                cmd = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(ROOT / "scripts" / "fingerprint.ps1"), "-Path", str(f), "-Json"]
             pr = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"}, cwd=str(ROOT))
             outs[e] = (pr.returncode, (pr.stdout or b"").decode("utf-8", "replace"))
         try:
@@ -1669,7 +1700,7 @@ def _run(results: list[bool]) -> int:
             if e == "py":
                 cmd = [PY, str(ROOT / "scripts" / "detect_ai_text.py"), "--input", str(f)]
             else:
-                cmd = [PS_RUNNER, "-NoProfile", "-File", str(ROOT / "scripts" / "detect_ai_text.ps1"), "-InputFile", str(f)]
+                cmd = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(ROOT / "scripts" / "detect_ai_text.ps1"), "-InputFile", str(f)]
             pr = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"}, cwd=str(ROOT))
             outs[e] = (pr.returncode, (pr.stdout or b"").decode("utf-8", "replace"))
         return len({(o[0], _nl(o[1])) for o in outs.values()}) == 1 and outs["py"][0] == 0
@@ -1688,7 +1719,7 @@ def _run(results: list[bool]) -> int:
         if engine == "py":
             cmd = [PY, str(_bdir2 / "check-doc-budget.py"), "--root", _missing]
         else:
-            cmd = [PS_RUNNER, "-NoProfile", "-File", str(_bdir2 / "check-doc-budget.ps1"), "-Root", _missing]
+            cmd = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(_bdir2 / "check-doc-budget.ps1"), "-Root", _missing]
         pr = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"}, cwd=str(_bdir2))
         return pr.returncode, _decode(pr.stdout)
 
@@ -1706,7 +1737,7 @@ def _run(results: list[bool]) -> int:
         if engine == "py":
             cmd = [PY, str(ROOT / "scripts" / "check-done.py"), "--project", str(p_file), "--chapter", "1"]
         else:
-            cmd = [PS_RUNNER, "-NoProfile", "-File", str(ROOT / "scripts" / "check-done.ps1"), "-Project", str(p_file), "-Chapter", "1"]
+            cmd = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(ROOT / "scripts" / "check-done.ps1"), "-Project", str(p_file), "-Chapter", "1"]
         pr = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
         return pr.returncode, _decode(pr.stdout)
 
@@ -1725,7 +1756,7 @@ def _run(results: list[bool]) -> int:
         if engine == "py":
             cmd = [PY, str(ROOT / "scripts" / "detect_ai_text.py"), "--input", str(_bfx)]
         else:
-            cmd = [PS_RUNNER, "-NoProfile", "-File", str(ROOT / "scripts" / "detect_ai_text.ps1"), "-InputFile", str(_bfx)]
+            cmd = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(ROOT / "scripts" / "detect_ai_text.ps1"), "-InputFile", str(_bfx)]
         pr = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
         return pr.returncode, _decode(pr.stdout)
 
@@ -1801,7 +1832,7 @@ def _run(results: list[bool]) -> int:
         if engine == "py":
             cmd = [PY, str(d / "check-done.py"), "--project", str(d), "--chapter", "1"]
         else:
-            cmd = [PS_RUNNER, "-NoProfile", "-File", str(d / "check-done.ps1"), "-Project", str(d), "-Chapter", "1"]
+            cmd = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(d / "check-done.ps1"), "-Project", str(d), "-Chapter", "1"]
         pr = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
         return pr.returncode, _decode(pr.stdout)
 
@@ -1853,7 +1884,7 @@ def _run(results: list[bool]) -> int:
         if engine == "py":
             cmd = [PY, str(ROOT / "scripts" / "package_skill.py"), "--check", "--root", str(d)]
         else:
-            cmd = [PS_RUNNER, "-NoProfile", "-File", str(ROOT / "scripts" / "package_skill.ps1"), "-Check", "-Root", str(d)]
+            cmd = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(ROOT / "scripts" / "package_skill.ps1"), "-Check", "-Root", str(d)]
         pr = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
         return pr.returncode == 1 and "缺字段" in _decode(pr.stdout)
     results += check_engines("[六轮] package frontmatter 大小写（Name:）→ 双引擎同判 exit1", True, _pkg_case_ok)
@@ -1876,7 +1907,7 @@ def _run(results: list[bool]) -> int:
         if engine == "py":
             cmd = [PY, str(d / "check-doc-budget.py"), "--root", str(d)]
         else:
-            cmd = [PS_RUNNER, "-NoProfile", "-File", str(d / "check-doc-budget.ps1"), "-Root", str(d)]
+            cmd = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(d / "check-doc-budget.ps1"), "-Root", str(d)]
         pr = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
         return pr.returncode, _decode(pr.stdout)
 
@@ -1916,7 +1947,7 @@ def _run(results: list[bool]) -> int:
         if engine == "py":
             cmd = [PY, str(ROOT / "scripts" / "detect_ai_text.py"), "--input", miss]
         else:
-            cmd = [PS_RUNNER, "-NoProfile", "-File", str(ROOT / "scripts" / "detect_ai_text.ps1"), "-InputFile", miss]
+            cmd = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(ROOT / "scripts" / "detect_ai_text.ps1"), "-InputFile", miss]
         pr = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
         return pr.returncode, _decode(pr.stdout)
 
@@ -1965,7 +1996,7 @@ def _run(results: list[bool]) -> int:
         if engine == "py":
             cmd = [PY, str(ROOT / "scripts" / "text_guard.py"), "digest", "--project", str(pj), "--chapter", "1"]
         else:
-            cmd = [PS_RUNNER, "-NoProfile", "-File", str(ROOT / "scripts" / "text_guard.ps1"), "-Command", "digest", "-Project", str(pj), "-Chapter", "1"]
+            cmd = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(ROOT / "scripts" / "text_guard.ps1"), "-Command", "digest", "-Project", str(pj), "-Chapter", "1"]
         pr = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
         ledger = pj / ".story" / "text-digests.json"
         return pr.returncode, _decode(pr.stdout), ledger.is_file()
@@ -1993,7 +2024,7 @@ def _run(results: list[bool]) -> int:
                 if _tq:
                     cmd.append("--require-task-sheet")
             else:
-                cmd = [PS_RUNNER, "-NoProfile", "-File", str(ROOT / "scripts" / "check-done.ps1"), "-Project", str(proj), "-Chapter", "3000000000"]
+                cmd = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(ROOT / "scripts" / "check-done.ps1"), "-Project", str(proj), "-Chapter", "3000000000"]
                 if _tq:
                     cmd.append("-RequireTaskSheet")
             pr = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
@@ -2016,12 +2047,15 @@ def _run(results: list[bool]) -> int:
             "files": [{"path": "\x1cA.md", "budget": 1000, "why": "w", "layer": "protected"}],
             "paths": [{"label": "路径X", "files": ["A.md"]}],
             "path_ceiling": {"limit": 1000, "exempt": [], "why": "w"},
+            "baseline": {"worst_path_chars": 1, "writer_delegated_chars": 0,
+                         "session_resident_chars": 0, "precheck_path_chars": 0,
+                         "max_single_file": "A.md=1", "measured_on": "2026-10-18"},
             "context_layers": {"protected": "p", "compressible": "c", "why": "w"}
         }, ensure_ascii=False), encoding="utf-8")
         if engine == "py":
             cmd = [PY, str(d / "check-doc-budget.py"), "--root", str(d)]
         else:
-            cmd = [PS_RUNNER, "-NoProfile", "-File", str(d / "check-doc-budget.ps1"), "-Root", str(d)]
+            cmd = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(d / "check-doc-budget.ps1"), "-Root", str(d)]
         pr = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
         return pr.returncode, _decode(pr.stdout)
 
@@ -2050,7 +2084,7 @@ def _run(results: list[bool]) -> int:
     def _mmp_unknown(engine):
         if engine == "py":
             return None  # 脚本仅 ps1 实现
-        cmd = [PS_RUNNER, "-NoProfile", "-File", str(ROOT / "scripts" / "migrate_memory_paths.ps1"), "-NoSuchParam", "x"]
+        cmd = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(ROOT / "scripts" / "migrate_memory_paths.ps1"), "-NoSuchParam", "x"]
         pr = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
         return pr.returncode, _decode(pr.stdout) + _decode(pr.stderr)
 
@@ -2203,7 +2237,7 @@ def _run(results: list[bool]) -> int:
         if engine == "py":
             cmd = [PY, str(ROOT / "scripts" / "check-done.py"), "--project", str(proj), "--chapter", "3000000000"]
         else:
-            cmd = [PS_RUNNER, "-NoProfile", "-File", str(ROOT / "scripts" / "check-done.ps1"), "-Project", str(proj), "-Chapter", "3000000000"]
+            cmd = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(ROOT / "scripts" / "check-done.ps1"), "-Project", str(proj), "-Chapter", "3000000000"]
         pr = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
         return pr.returncode, _decode(pr.stdout).replace(str(proj), "<PROJ>")
 
@@ -2374,10 +2408,10 @@ def _run(results: list[bool]) -> int:
     # d20) 现有 state 族闸三形态（facts=5 / timeline.readers_known="abc" / foreshadow=5）→ check 双引擎 rc1
     def _fam_ok(engine):
         okv = True
-        for mk, needle in ((lambda j: j.update({"facts": 5}), "facts 须为数组"),
+        for _fi_f2, (mk, needle) in enumerate(((lambda j: j.update({"facts": 5}), "facts 须为数组"),
                            (lambda j: j["timeline"].update({"readers_known": "abc"}), "timeline.readers_known 须为数组"),
-                           (lambda j: j.update({"foreshadow": 5}), "foreshadow 须为对象")):
-            proj = _nhd / f"p_fam_{engine}_{abs(hash(needle)) % 997}"
+                           (lambda j: j.update({"foreshadow": 5}), "foreshadow 须为对象"))):
+            proj = _nhd / f"p_fam_{engine}_{_fi_f2}"
             proj.mkdir()
             if run_state(engine, "init", "--project", str(proj))[0] != 0:
                 return False
@@ -2557,8 +2591,8 @@ def _run(results: list[bool]) -> int:
     # d27) 元素型闸两形态（stages=[[1,2]] / foreshadow.F1="串"）→ check 双引擎 rc1 同文案
     def _elem_ok(engine):
         okv = True
-        for mk, needle in ((None, "overview.stages 元素须为字符串或对象"), (None, "foreshadow.F1 须为对象")):
-            proj = _nhd / f"p_elem_{engine}_{abs(hash(needle)) % 997}"
+        for _fi_e, needle in enumerate(("overview.stages 元素须为字符串或对象", "foreshadow.F1 须为对象")):
+            proj = _nhd / f"p_elem_{engine}_{_fi_e}"
             proj.mkdir()
             if run_state(engine, "init", "--project", str(proj))[0] != 0:
                 return False
@@ -2599,9 +2633,1071 @@ def _run(results: list[bool]) -> int:
                         f"py={_reval_msgs.get('py', '')[:80]} || ps1={_reval_msgs.get('ps1', '')[:80]}"))
 
     # 基础守卫：双引擎必须齐全（缺 PowerShell 时不得静默降级单引擎全绿）
-    results.append(case("[基础] 双引擎守卫：ENGINES 必含 py+ps1", True,
+    results.append(case("[十七轮] 双引擎守卫：ENGINES 必含 py+ps1", True,
                         len(ENGINES) == 2 and set(ENGINES) == {"py", "ps1"},
                         f"ENGINES={ENGINES}——本机需 pwsh(7) 或 Windows PowerShell 在 PATH"))
+
+
+    # === 十八轮修复回归组（B域：null 元素穿透双引擎同判） ===
+    # d29) stages=[null] / timeline=[null] / aliases=[null] / facts=[null] → check 双引擎同文案 rc1
+    _null_msgs: dict = {}
+    def _nullelem_ok(engine):
+        okv = True
+        _null_msgs[engine] = []
+        forms = ((lambda j: j["overview"].update({"stages": [None]}), "overview.stages 元素须为字符串或对象"),
+                 (lambda j: j["timeline"].update({"readers_known": [None]}), "timeline.readers_known 元素须为字符串或对象"),
+                 (lambda j: j.update({"characters": {"甲": {"snapshot": "s", "aliases": [None]}}}), "characters.甲.aliases 元素须为字符串"),
+                 (lambda j: j.update({"facts": [None]}), "facts[0] 须为对象"))
+        for _fi_f, (mk, needle) in enumerate(forms):
+            proj = _nhd / f"p_nullelem_{engine}_{_fi_f}"
+            proj.mkdir()
+            if run_state(engine, "init", "--project", str(proj))[0] != 0:
+                return False
+            spf = proj / "记忆系统" / "_state.json"
+            j = json.loads(spf.read_text(encoding="utf-8"))
+            mk(j)
+            spf.write_text(json.dumps(j, ensure_ascii=False, indent=2), encoding="utf-8")
+            rc, out = run_state(engine, "check", "--project", str(proj))
+            _null_msgs[engine].append(out.strip().replace(str(proj), "<PROJ>"))
+            okv = okv and rc == 1 and needle in out
+        return okv
+    results += check_engines("[十八轮] null 元素四形态 → check 双引擎同文案 rc1（无 null 豁免）", True, _nullelem_ok)
+    results.append(case("[十八轮] null 元素四形态错误输出 py/ps1 逐字一致", True,
+                        len(_null_msgs) == 2 and _null_msgs.get("py") == _null_msgs.get("ps1"),
+                        "输出不一致" if _null_msgs.get("py") != _null_msgs.get("ps1") else ""))
+
+
+    # === 十八轮修复回归组 2（数字域：基线闸 pw7 数组拍平修复） ===
+    # d30) baseline.session_resident_chars 过期 → py/ps1(pw7)/ps1(5.1) 三引擎同文案 rc1
+    _bd3 = Path(tempfile.mkdtemp(prefix="budget-blsync-"))
+    for _f in ("check-doc-budget.py", "check-doc-budget.ps1", "doc-budget.json"):
+        shutil.copy2(ROOT / "scripts" / _f, _bd3 / _f)
+    (_bd3 / "A.md").write_text("一" * 100, encoding="utf-8")
+    (_bd3 / "doc-budget.json").write_text(json.dumps({
+        "files": [{"path": "A.md", "budget": 100000, "why": "基线闸用例", "layer": "protected"}],
+        "paths": [{"label": "路径B", "files": "A.md"},
+                  {"label": "写一章·写手委派", "files": "A.md"},
+                  {"label": "主会话常驻（入口+协议+索引）", "files": "A.md"},
+                  {"label": "写前预检", "files": "A.md"}],
+        "generated": "G.md",
+        "path_ceiling": {"limit": 100000, "why": "t"},
+        "baseline": {"worst_path_chars": 999, "writer_delegated_chars": 999,
+                     "session_resident_chars": 999, "precheck_path_chars": 999,
+                     "max_single_file": "A.md=999", "measured_on": "2026-10-18"},
+        "context_layers": {"protected": "p", "compressible": "c", "why": "w"}
+    }, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def _bl3_run(engine: str) -> tuple[int, str]:
+        if engine == "ps1":
+            cmd = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(_bd3 / "check-doc-budget.ps1"), "-Root", str(_bd3)]
+        else:
+            cmd = [PY, str(_bd3 / "check-doc-budget.py"), "--root", str(_bd3)]
+        proc = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+        return proc.returncode, _decode(proc.stdout) + _decode(proc.stderr)
+    _r_b3 = {e: _bl3_run(e) for e in ENGINES}
+    results.append(case("[十八轮] 基线闸五字段全过期 → ps1 rc1 且五字段全点名（Int64 判型已修）", True,
+                        _r_b3["ps1"][0] == 1 and _r_b3["ps1"][1].count("基线过期") == 5
+                        and all(_k in _r_b3["ps1"][1] for _k in ("worst_path_chars", "writer_delegated_chars", "session_resident_chars", "precheck_path_chars", "max_single_file"))))
+    results.append(case("[十八轮] 基线闸过期 → py/ps1 错误清单逐条一致", True,
+                        _r_b3["py"][0] == 1 and _nl(_r_b3["ps1"][1]) == _nl(_r_b3["py"][1])))
+
+
+    # === 十九轮修复回归组（数字域：基线值浮点型 fail-closed） ===
+    # d31) baseline 浮点写法（46959.0）→ py/ps1 均 rc1「基线非法」
+    _bd4 = Path(tempfile.mkdtemp(prefix="budget-badtype-"))
+    for _f in ("check-doc-budget.py", "check-doc-budget.ps1", "doc-budget.json"):
+        shutil.copy2(ROOT / "scripts" / _f, _bd4 / _f)
+    (_bd4 / "A.md").write_text("一" * 100, encoding="utf-8")
+    (_bd4 / "doc-budget.json").write_text(json.dumps({
+        "files": [{"path": "A.md", "budget": 100000, "why": "浮点基线用例", "layer": "protected"}],
+        "paths": [{"label": "路径F", "files": "A.md"}],
+        "generated": "G.md",
+        "path_ceiling": {"limit": 100000, "why": "t"},
+        "baseline": {"worst_path_chars": 100.0, "writer_delegated_chars": 100,
+                     "session_resident_chars": 100, "precheck_path_chars": 100,
+                     "max_single_file": "A.md=100", "measured_on": "2026-10-18"},
+        "context_layers": {"protected": "p", "compressible": "c", "why": "w"}
+    }, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def _badtype_run(engine: str) -> tuple[int, str]:
+        if engine == "ps1":
+            cmd = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(_bd4 / "check-doc-budget.ps1"), "-Root", str(_bd4)]
+        else:
+            cmd = [PY, str(_bd4 / "check-doc-budget.py"), "--root", str(_bd4)]
+        proc = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+        return proc.returncode, _decode(proc.stdout) + _decode(proc.stderr)
+    _r_bt = {e: _badtype_run(e) for e in ENGINES}
+    results.append(case("[十九轮] baseline 浮点值 → py rc1 且点名「基线非法」（非整型 fail-closed）", True,
+                        _r_bt["py"][0] == 1 and "基线非法" in _r_bt["py"][1] and "worst_path_chars" in _r_bt["py"][1]))
+    results.append(case("[十九轮] baseline 浮点值 → ps1 与 py 同文案逐条一致", True,
+                        _r_bt["ps1"][0] == 1 and _nl(_r_bt["ps1"][1]) == _nl(_r_bt["py"][1])))
+
+
+    # === 二十轮修复回归组（数字域：基线闸五键齐全/换型 fail-closed） ===
+    # d32) 缺键/块缺失/字符串换型/布尔换型/max_single 非串 → 双引擎 rc1「基线非法/基线缺键」
+    _bl_muts = [
+        (lambda b: b["baseline"].pop("precheck_path_chars"), "基线缺键", "precheck_path_chars", "二十轮"),
+        (lambda b: b.update({"baselineX": b.pop("baseline")}), "基线非法：baseline 块缺失", "baseline 块缺失", "二十轮"),
+        (lambda b: b["baseline"].update({"worst_path_chars": "0"}), "基线非法", "worst_path_chars", "二十轮"),
+        (lambda b: b["baseline"].update({"writer_delegated_chars": True}), "基线非法", "writer_delegated_chars", "二十轮"),
+        (lambda b: b["baseline"].update({"max_single_file": 123}), "基线非法", "max_single_file", "二十轮"),
+        (lambda b: b.update({"baseline": {}}), "基线缺键", "worst_path_chars", "二十一轮"),
+        (lambda b: b["baseline"].update({"max_single_file": "B.md=50"}), "基线过期", "路径段须为实测最大单文件名", "二十一轮"),
+    ]
+    def _blmut_run(engine, mut, _d):
+        if engine == "ps1":
+            cmd = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(_d / "check-doc-budget.ps1"), "-Root", str(_d)]
+        else:
+            cmd = [PY, str(_d / "check-doc-budget.py"), "--root", str(_d)]
+        pr = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+        return pr.returncode, _decode(pr.stdout)
+
+    def _blmut_pair(i, mut):
+        _d = Path(tempfile.mkdtemp(prefix="budget-blmut-"))
+        for _f in ("check-doc-budget.py", "check-doc-budget.ps1", "doc-budget.json"):
+            shutil.copy2(ROOT / "scripts" / _f, _d / _f)
+        (_d / "A.md").write_text("一" * 50, encoding="utf-8")
+        _b = {"files": [{"path": "A.md", "budget": 100000, "why": "二十轮基线闸用例", "layer": "protected"}],
+              "paths": [], "path_ceiling": {"limit": 100000, "exempt": [], "why": "t"},
+              "baseline": {"worst_path_chars": 0, "writer_delegated_chars": 0,
+                           "session_resident_chars": 0, "precheck_path_chars": 0,
+                           "max_single_file": "A.md=50", "measured_on": "2026-10-18"},
+              "context_layers": {"protected": "p", "compressible": "c", "why": "w"}}
+        mut(_b)
+        (_d / "doc-budget.json").write_text(json.dumps(_b, ensure_ascii=False), encoding="utf-8")
+        return {en: _blmut_run(en, mut, _d) for en in ENGINES}
+    _rr_blm = {i: _blmut_pair(i, m) for i, (m, _n1, _n2, _t1) in enumerate(_bl_muts)}
+    for i, (m, needle1, needle2, _tagm) in enumerate(_bl_muts):
+        results.append(case(f"[{_tagm}] 基线闸变异{i + 1}（{needle1}/{needle2}）→ py rc1 且点名", True,
+                            _rr_blm[i]["py"][0] == 1 and needle1 in _rr_blm[i]["py"][1]
+                            and needle2 in _rr_blm[i]["py"][1]))
+    _cross("[二十轮] 基线闸七类变异 → ps1 与 py 错误清单逐条一致", True,
+           lambda: all(_nl(_rr_blm[i]["ps1"][1]) == _nl(_rr_blm[i]["py"][1])
+                       and _rr_blm[i]["ps1"][0] == 1 for i in range(len(_bl_muts))))
+
+
+    # === 二十二轮修复回归组（BOM/深度/展示/Int64 双引擎同判） ===
+    # d34) ①fingerprint BOM ②detect 词表 BOM ③foreshadow 状态单 BOM ④state 深层落盘 ⑤预算展示 1e30 ⑥超 Int64 limit
+    # ① fingerprint 带 BOM → 双引擎指标值全等（py utf-8-sig 对齐 ps1 剥 BOM）
+    _f_bom = _nhd / "fp_bom.txt"
+    _f_bom.write_bytes(b"\xef\xbb\xbf" + "甲乙丙。丁戊己。庚辛壬。".encode("utf-8"))
+    _rr_bfp = {}
+    for _e_bfp in ENGINES:
+        if _e_bfp == "py":
+            _cmd_bfp = [PY, str(ROOT / "scripts" / "fingerprint.py"), str(_f_bom)]
+        else:
+            _cmd_bfp = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(ROOT / "scripts" / "fingerprint.ps1"), "-Path", str(_f_bom), "-Json"]
+        _pr_bfp = subprocess.run(_cmd_bfp, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"}, cwd=str(ROOT))
+        _rr_bfp[_e_bfp] = (_pr_bfp.returncode, _decode(_pr_bfp.stdout))
+    def _fp_json(o):
+        d = json.loads(o)
+        return {k: (float(v) if isinstance(v, (int, float)) else v) for k, v in d.items()}
+    _fp_norm = [{k: (float(v) if isinstance(v, (int, float)) else v) for k, v in _fp_json(v_[1]).items()} for v_ in _rr_bfp.values()]
+    results.append(case("[二十二轮] fingerprint 带 BOM → py/ps1 全部指标键值全等 rc0（py utf-8-sig 对齐）", True,
+                        all(v[0] == 0 for v in _rr_bfp.values())
+                        and len(_fp_norm) == 2 and _fp_norm[0] == _fp_norm[1] and "总字数" in _fp_norm[0]))
+    # ② detect --extra-lexicon 带 BOM → 双引擎命中数同文案（py 词表入口 utf-8-sig）
+    _lex_b = _nhd / "lex_bom.txt"
+    _lex_b.write_bytes(b"\xef\xbb\xbf" + "套话一\n套话二\n".encode("utf-8"))
+    _in_b = _nhd / "in_bom.txt"
+    _in_b.write_text("套话一。他说套话二。", encoding="utf-8")
+    _rr_blex = {}
+    for _e_blx in ENGINES:
+        if _e_blx == "py":
+            _cmd_blx = [PY, str(ROOT / "scripts" / "detect_ai_text.py"), "--input", str(_in_b), "--extra-lexicon", str(_lex_b)]
+        else:
+            _cmd_blx = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(ROOT / "scripts" / "detect_ai_text.ps1"), "-InputFile", str(_in_b), "-ExtraLexicon", str(_lex_b)]
+        _pr_blx = subprocess.run(_cmd_blx, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"}, cwd=str(ROOT))
+        _rr_blex[_e_blx] = (_pr_blx.returncode, _decode(_pr_blx.stdout))
+    results.append(case("[二十二轮] detect 词表带 BOM → 双引擎「套话一」同命中同文案 rc0", True,
+                        all(v[0] == 0 and "套话一" in v[1] for v in _rr_blex.values())
+                        and len({_nl(v[1]) for v in _rr_blex.values()}) == 1))
+    # ③ foreshadow 状态单带 BOM → 双引擎 rc0 且伏笔时间线产物逐字一致（py utf-8-sig，不再裸 Traceback）
+    def _fs_bom_run(engine):
+        _pj = _nhd / f"p_fsbom_{engine}"
+        _pj.mkdir(parents=True)
+        run_state(engine, "init", "--project", str(_pj))
+        _st = _pj / "记忆系统" / "_state.json"
+        if not _st.is_file():
+            return (9, "init 未生成 _state.json", "")
+        _st.write_bytes(b"\xef\xbb\xbf" + _st.read_bytes())
+        (_pj / "正文").mkdir(exist_ok=True)
+        (_pj / "正文" / "第001章_试炼.txt").write_text("夜色里他许下伏笔，前文曾提过约定。", encoding="utf-8")
+        if engine == "ps1":
+            _cmd_fs = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(FS_PS1), "-Project", str(_pj)]
+        else:
+            _cmd_fs = [PY, str(FS_PY), "--project", str(_pj)]
+        _pr_fs = subprocess.run(_cmd_fs, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+        _md = _pj / "记忆系统" / "圣经" / "伏笔时间线.md"
+        return (_pr_fs.returncode, _decode(_pr_fs.stdout), (_md.read_text(encoding="utf-8") if _md.is_file() else ""))
+    _rr_fsb = {e: _fs_bom_run(e) for e in ENGINES}
+    results.append(case("[二十二轮] foreshadow 状态单带 BOM → 双引擎 rc0 且产物逐字一致（py 不再裸 Traceback）", True,
+                        all(v[0] == 0 for v in _rr_fsb.values())
+                        and len({v[2] for v in _rr_fsb.values()}) == 1 and _rr_fsb["py"][2] != ""))
+    # ④ state 深层 delta（meta 15 层）→ 双引擎落盘深度一致不截断（ps1 -Depth 100）
+    def _deep_run(engine):
+        _pj = _nhd / f"p_deep_{engine}"
+        _pj.mkdir(parents=True)
+        run_state(engine, "init", "--project", str(_pj))
+        (_pj / "记忆系统").mkdir(parents=True, exist_ok=True)
+        _meta = "x"
+        for _i_d in range(15):
+            _meta = {"n" + str(_i_d): 1} if isinstance(_meta, dict) and not _meta else {"n" + str(_i_d): _meta}
+        (_pj / "正文").mkdir(exist_ok=True)
+        (_pj / "正文" / "第001章_试炼.txt").write_text("夜色压着山脊。", encoding="utf-8")
+        run_state(engine, "draft", "--project", str(_pj), "--chapter", "1")
+        _txn = write_txn(_pj, 1, {"foreshadow": {"F1": {"title": "t", "status": "pending", "chapter": 1, "meta": _meta}}})
+        rc_c, out_c = run_state(engine, "commit", "--project", str(_pj), "--chapter", "1", "--input", str(_txn))
+        _st = json.loads((_pj / "记忆系统" / "_state.json").read_text(encoding="utf-8-sig"))
+        _m = _st.get("foreshadow", {}).get("F1", {}).get("meta")
+        _depth = 0
+        while isinstance(_m, dict) and _m:
+            _depth += 1
+            _m = next(iter(_m.values()))
+        return rc_c, _depth
+    _rr_deep = {e: _deep_run(e) for e in ENGINES}
+    results.append(case("[二十二轮] state 深层 delta（meta 15 层）→ 双引擎落盘深度=15 不截断 rc0", True,
+                        all(v[0] == 0 and v[1] == 15 for v in _rr_deep.values())))
+    # ⑤ 预算 baseline 浮点 1e30 → 双引擎「基线非法」且数字串同为 1E+30（G15 归一）
+    _bd_e = Path(tempfile.mkdtemp(prefix="budget-1e30-"))
+    for _f in ("check-doc-budget.py", "check-doc-budget.ps1", "doc-budget.json"):
+        shutil.copy2(ROOT / "scripts" / _f, _bd_e / _f)
+    (_bd_e / "A.md").write_text("一" * 100, encoding="utf-8")
+    (_bd_e / "doc-budget.json").write_text(json.dumps({
+        "files": [{"path": "A.md", "budget": 100000, "why": "1e30 展示用例", "layer": "protected"}],
+        "paths": [{"label": "路径F", "files": "A.md"}],
+        "generated": "G.md",
+        "path_ceiling": {"limit": 100000, "why": "t"},
+        "baseline": {"worst_path_chars": 1e30, "writer_delegated_chars": 100,
+                     "session_resident_chars": 100, "precheck_path_chars": 100,
+                     "max_single_file": "A.md=100", "measured_on": "2026-10-18"},
+        "context_layers": {"protected": "p", "compressible": "c", "why": "w"}
+    }, ensure_ascii=False, indent=2), encoding="utf-8")
+    def _run_1e30(engine):
+        if engine == "ps1":
+            cmd = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(_bd_e / "check-doc-budget.ps1"), "-Root", str(_bd_e)]
+        else:
+            cmd = [PY, str(_bd_e / "check-doc-budget.py"), "--root", str(_bd_e)]
+        proc = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+        return proc.returncode, _decode(proc.stdout)
+    _r_e30 = {e: _run_1e30(e) for e in ENGINES}
+    results.append(case("[二十二轮] baseline=1e30 → 双引擎「基线非法」且数字串同为 1E+30", True,
+                        all(v[0] == 1 and "1E+30" in v[1] and "基线非法" in v[1] for v in _r_e30.values())
+                        and len({_nl(v[1]) for v in _r_e30.values()}) == 1))
+    # ⑥ 超 Int64 整数 limit → py/ps1 同判 rc1「须为非负整数」（py _in_i64 收口）
+    (_bd_e / "doc-budget.json").write_text(json.dumps({
+        "files": [{"path": "A.md", "budget": 100000, "why": "Int64 用例", "layer": "protected"}],
+        "paths": [],
+        "path_ceiling": {"limit": 10 ** 30, "exempt": [], "why": "t"},
+        "baseline": {"worst_path_chars": 100, "writer_delegated_chars": 100,
+                     "session_resident_chars": 100, "precheck_path_chars": 100,
+                     "max_single_file": "A.md=100", "measured_on": "2026-10-18"},
+        "context_layers": {"protected": "p", "compressible": "c", "why": "w"}
+    }, ensure_ascii=False, indent=2), encoding="utf-8")
+    _r_i64 = {e: _run_1e30(e) for e in ENGINES}
+    results.append(case("[二十二轮] limit=10^30 超 Int64 → 双引擎同判 rc1「path_ceiling.limit 须为非负整数」", True,
+                        all(v[0] == 1 and "path_ceiling.limit 须为非负整数" in v[1] for v in _r_i64.values())
+                        and len({_nl(v[1]) for v in _r_i64.values()}) == 1))
+
+
+    # === 二十三轮修复回归组（BOM 状态单读入口、展示归一） ===
+    # d35① _state.json 带 BOM → py draft/check 与 ps1 同判 rc0（load_json utf-8-sig）
+    def _bomst_run(engine):
+        _pj = _nhd / f"p_bomst_{engine}"
+        _pj.mkdir(parents=True)
+        run_state(engine, "init", "--project", str(_pj))
+        (_pj / "正文").mkdir(exist_ok=True)
+        (_pj / "正文" / "第001章_试炼.txt").write_text("夜色压着山脊。", encoding="utf-8")
+        _st = _pj / "记忆系统" / "_state.json"
+        _st.write_bytes(b"\xef\xbb\xbf" + _st.read_bytes())
+        _rc1, _o1 = run_state(engine, "draft", "--project", str(_pj), "--chapter", "1")
+        _rc2, _o2 = run_state(engine, "check", "--project", str(_pj))
+        return _rc1, _nl(_o1).replace(str(_pj), "<PROJ>"), _rc2, _nl(_o2).replace(str(_pj), "<PROJ>")
+    _rr_bs = {e: _bomst_run(e) for e in ENGINES}
+    results.append(case("[二十三轮] _state.json 带 BOM → 双引擎 draft/check 同判 rc0（load_json utf-8-sig）", True,
+                        _rr_bs["py"][0] == 0 and _rr_bs["py"][2] == 0
+                        and len(set(_rr_bs.values())) == 1))
+    # d35② 非法基线展示：Infinity / 超 Int64 整数 / 全角 max_single 数字段 → 双引擎同文案 rc1
+    def _disp_pair(mutate):
+        _d = Path(tempfile.mkdtemp(prefix="budget-disp-"))
+        for _f in ("check-doc-budget.py", "check-doc-budget.ps1", "doc-budget.json"):
+            shutil.copy2(ROOT / "scripts" / _f, _d / _f)
+        (_d / "A.md").write_text("一" * 100, encoding="utf-8")
+        _b = {"files": [{"path": "A.md", "budget": 100000, "why": "展示归一用例", "layer": "protected"}],
+              "paths": [], "path_ceiling": {"limit": 100000, "why": "t"},
+              "baseline": {"worst_path_chars": 0, "writer_delegated_chars": 0,
+                           "session_resident_chars": 0, "precheck_path_chars": 0,
+                           "max_single_file": "A.md=100", "measured_on": "2026-10-18"},
+              "context_layers": {"protected": "p", "compressible": "c", "why": "w"}}
+        mutate(_b)
+        (_d / "doc-budget.json").write_text(json.dumps(_b, ensure_ascii=False), encoding="utf-8")
+        outs = {}
+        for _e in ENGINES:
+            if _e == "ps1":
+                cmd = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(_d / "check-doc-budget.ps1"), "-Root", str(_d)]
+            else:
+                cmd = [PY, str(_d / "check-doc-budget.py"), "--root", str(_d)]
+            pr = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+            outs[_e] = (pr.returncode, _nl(_decode(pr.stdout)))
+        return outs
+    _disp_forms = (
+        (lambda b: b["baseline"].update({"worst_path_chars": float("inf")}), "INFINITY"),
+        (lambda b: b["baseline"].update({"worst_path_chars": 10 ** 30}), "1E+30"),
+        (lambda b: b["baseline"].update({"max_single_file": "A.md=５０"}), "基线非法"),
+    )
+    for _di, (_mut, _ndisp) in enumerate(_disp_forms):
+        _rr_disp = _disp_pair(_mut)
+        results.append(case(f"[二十三轮] 展示归一{ _di + 1 }（{_ndisp}）→ 双引擎同文案 rc1", True,
+                            all(v[0] == 1 and _ndisp in v[1] for v in _rr_disp.values())
+                            and len({_v[1] for _v in _rr_disp.values()}) == 1))
+
+
+    # === 二十四轮修复回归组（max_single 串形/三标量 Int64/null/text_guard 规则 BOM） ===
+    # d36① max_single='A.md=+100' → 双引擎同判 rc1「基线非法」（ps1 串形收严对齐 py 正则）
+    # 用共享目录（root 行一致）
+    _dp = Path(tempfile.mkdtemp(prefix="budget-plus-"))
+    for _f in ("check-doc-budget.py", "check-doc-budget.ps1", "doc-budget.json"):
+        shutil.copy2(ROOT / "scripts" / _f, _dp / _f)
+    (_dp / "A.md").write_text("一" * 100, encoding="utf-8")
+    (_dp / "doc-budget.json").write_text(json.dumps({
+        "files": [{"path": "A.md", "budget": 100000, "why": "二十四轮串形用例", "layer": "protected"}],
+        "paths": [], "path_ceiling": {"limit": 100000, "why": "t"},
+        "baseline": {"worst_path_chars": 0, "writer_delegated_chars": 0,
+                     "session_resident_chars": 0, "precheck_path_chars": 0,
+                     "max_single_file": "A.md=+100", "measured_on": "2026-10-18"},
+        "context_layers": {"protected": "p", "compressible": "c", "why": "w"}
+    }, ensure_ascii=False), encoding="utf-8")
+    _rr_plus = {}
+    for _e_p in ENGINES:
+        if _e_p == "ps1":
+            _c_p = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(_dp / "check-doc-budget.ps1"), "-Root", str(_dp)]
+        else:
+            _c_p = [PY, str(_dp / "check-doc-budget.py"), "--root", str(_dp)]
+        _pr_p = subprocess.run(_c_p, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+        _rr_plus[_e_p] = (_pr_p.returncode, _nl(_decode(_pr_p.stdout)))
+    results.append(case("[二十四轮] max_single=A.md=+100 → 双引擎同判 rc1「基线非法」（ps1 串形收严）", True,
+                        all(v[0] == 1 and "基线非法" in v[1] and "max_single_file" in v[1] for v in _rr_plus.values())
+                        and len({v[1] for v in _rr_plus.values()}) == 1))
+    # d36② 三标量超 Int64（10^30）→ state check 双引擎 rc1 同文案 + check-done 闭环双引擎 rc1
+    def _tri64(engine):
+        _pj = _nhd / f"p_tri64_{engine}"
+        _pj.mkdir(parents=True)
+        run_state(engine, "init", "--project", str(_pj))
+        empty_done(_pj, 1, BASE + ["state"])
+        write_body(_pj, 1, 10)
+        _stf = _pj / "记忆系统" / "_state.json"
+        _sj = json.loads(_stf.read_text(encoding="utf-8-sig"))
+        _sj["last_committed_chapter"] = 10 ** 30
+        _stf.write_text(json.dumps(_sj, ensure_ascii=False, indent=2), encoding="utf-8")
+        _rc1, _o1 = run_state(engine, "check", "--project", str(_pj))
+        if engine == "ps1":
+            _cd = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(ROOT / "scripts" / "check-done.ps1"), "-Project", str(_pj), "-Chapter", "1", "-SoftReport"]
+        else:
+            _cd = [PY, str(ROOT / "scripts" / "check-done.py"), "--project", str(_pj), "--chapter", "1", "--soft-report"]
+        _pr_cd = subprocess.run(_cd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+        return _rc1, _nl(_o1).replace(str(_pj), "<PROJ>"), _pr_cd.returncode, _nl(_pr_cd.stdout.decode("utf-8", "replace")).replace(str(_pj), "<PROJ>")
+    _rr_tri = {e: _tri64(e) for e in ENGINES}
+    results.append(case("[二十四轮] last_committed_chapter=10^30 → 双引擎 state check rc1 同文案（Int64 上界）", True,
+                        all(v[0] == 1 and "last_committed_chapter 必须是整数" in v[1] for v in _rr_tri.values())
+                        and len({(v[0], v[1]) for v in _rr_tri.values()}) == 1))
+    results.append(case("[二十四轮] last_committed_chapter=10^30 → check-done 闭环双引擎同判 rc1（py 不再 fail-open）", True,
+                        all(v[2] == 1 and "last_committed_chapter 不是整数" in v[3] for v in _rr_tri.values())
+                        and len({(v[2], v[3]) for v in _rr_tri.values()}) == 1))
+    # d36③ state_revision 显式 null → 双引擎 check 同判 rc1（键存在即须整数，fail-closed）
+    def _revnull(engine):
+        _pj = _nhd / f"p_revnull_{engine}"
+        _pj.mkdir(parents=True)
+        run_state(engine, "init", "--project", str(_pj))
+        _stf = _pj / "记忆系统" / "_state.json"
+        _sj = json.loads(_stf.read_text(encoding="utf-8-sig"))
+        _sj["state_revision"] = None
+        _stf.write_text(json.dumps(_sj, ensure_ascii=False, indent=2), encoding="utf-8")
+        _rc1, _o1 = run_state(engine, "check", "--project", str(_pj))
+        return _rc1, _nl(_o1).replace(str(_pj), "<PROJ>")
+    _rr_rn = {e: _revnull(e) for e in ENGINES}
+    results.append(case("[二十四轮] state_revision 显式 null → 双引擎 check 同判 rc1「必须是整数」", True,
+                        all(v[0] == 1 and "state_revision 必须是整数" in v[1] for v in _rr_rn.values())
+                        and len(set(_rr_rn.values())) == 1))
+    # d36④ text_guard 规则单带 BOM → 双引擎 digest rc0（rules 读取 utf-8-sig）
+    # 共享临时目录：拷贝双引擎脚本 + 带 BOM 的规则单（RULES_PATH 固定为脚本目录）
+    _tgd = _nhd / "p_tgbom_shared"
+    _tgd.mkdir(parents=True, exist_ok=True)
+    for _f_tg in ("text_guard.py", "text_guard.ps1"):
+        shutil.copy2(ROOT / "scripts" / _f_tg, _tgd / _f_tg)
+    (_tgd / "check-done-rules.json").write_bytes(b"\xef\xbb\xbf" + (ROOT / "scripts" / "check-done-rules.json").read_bytes())
+    _rr_tgb = {}
+    for _e_tg in ENGINES:
+        _pj_tg = _tgd / "proj"
+        (_pj_tg / "正文").mkdir(parents=True, exist_ok=True)
+        (_pj_tg / "正文" / "第001章_试炼.txt").write_text("夜色压着山脊。老陈把烟掐了。\n", encoding="utf-8")
+        if _e_tg == "ps1":
+            _c_tg = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(_tgd / "text_guard.ps1"), "digest", "-Project", str(_pj_tg), "-Chapter", "1"]
+        else:
+            _c_tg = [PY, str(_tgd / "text_guard.py"), "digest", "--project", str(_pj_tg), "--chapter", "1"]
+        _pr_tg = subprocess.run(_c_tg, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+        _led_ok = (_pj_tg / ".story" / "text-digests.json").is_file()
+        _rr_tgb[_e_tg] = (_pr_tg.returncode, _nl((_pr_tg.stdout + _pr_tg.stderr).decode("utf-8", "replace")).replace(str(_tgd), "<TG>"), _led_ok)
+    results.append(case("[二十四轮] text_guard 规则单带 BOM → 双引擎 digest rc0 且账本真实落盘同文案（rules 读取 utf-8-sig）", True,
+                        all(v[0] == 0 and v[2] for v in _rr_tgb.values())
+                        and len(set(_rr_tgb.values())) == 1))
+
+
+    # === 二十五轮修复回归组（max_single 尾 \n 串形、Int64 上界自增） ===
+    # d37① max_single="A.md=100\n" → 双引擎同判 rc1（ps1 \A\z 收严，不被 $ 尾换行放行）
+    _dn = Path(tempfile.mkdtemp(prefix="budget-nl-"))
+    for _f in ("check-doc-budget.py", "check-doc-budget.ps1", "doc-budget.json"):
+        shutil.copy2(ROOT / "scripts" / _f, _dn / _f)
+    (_dn / "A.md").write_text("一" * 100, encoding="utf-8")
+    (_dn / "doc-budget.json").write_text(json.dumps({
+        "files": [{"path": "A.md", "budget": 100000, "why": "二十五轮串形用例", "layer": "protected"}],
+        "paths": [], "path_ceiling": {"limit": 100000, "why": "t"},
+        "baseline": {"worst_path_chars": 0, "writer_delegated_chars": 0,
+                     "session_resident_chars": 0, "precheck_path_chars": 0,
+                     "max_single_file": "A.md=100\n", "measured_on": "2026-10-18"},
+        "context_layers": {"protected": "p", "compressible": "c", "why": "w"}
+    }, ensure_ascii=False), encoding="utf-8")
+    _rr_nl = {}
+    for _e_nl in ENGINES:
+        if _e_nl == "ps1":
+            _c_nl = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(_dn / "check-doc-budget.ps1"), "-Root", str(_dn)]
+        else:
+            _c_nl = [PY, str(_dn / "check-doc-budget.py"), "--root", str(_dn)]
+        _pr_nl = subprocess.run(_c_nl, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+        _rr_nl[_e_nl] = (_pr_nl.returncode, _nl(_decode(_pr_nl.stdout)))
+    results.append(case("[二十五轮] max_single=A.md=100+尾换行 → 双引擎同判 rc1「基线非法」（ps1 \\A\\z 收严）", True,
+                        all(v[0] == 1 and "基线非法" in v[1] and "max_single_file" in v[1] for v in _rr_nl.values())
+                        and len({v[1] for v in _rr_nl.values()}) == 1))
+    # d37② state_revision=Int64 上界 → 双引擎 commit 同判 rc1「自增会溢出」（拒绝提交，状态不变）
+    def _i64top(engine):
+        _pj = _nhd / f"p_i64top_{engine}"
+        _pj.mkdir(parents=True)
+        run_state(engine, "init", "--project", str(_pj))
+        (_pj / "正文").mkdir(exist_ok=True)
+        (_pj / "正文" / "第001章_试炼.txt").write_text("夜色压着山脊。", encoding="utf-8")
+        run_state(engine, "draft", "--project", str(_pj), "--chapter", "1")
+        _stf = _pj / "记忆系统" / "_state.json"
+        _sj = json.loads(_stf.read_text(encoding="utf-8-sig"))
+        _sj["state_revision"] = 2 ** 63 - 1
+        _stf.write_text(json.dumps(_sj, ensure_ascii=False, indent=2), encoding="utf-8")
+        _txn = write_txn(_pj, 1, {"characters": {"甲": {"snapshot": "s"}}})
+        _rc1, _o1 = run_state(engine, "commit", "--project", str(_pj), "--chapter", "1", "--input", str(_txn))
+        return _rc1, _nl(_o1).replace(str(_pj), "<PROJ>")
+    _rr_top = {e: _i64top(e) for e in ENGINES}
+    results.append(case("[二十五轮] state_revision=Int64 上界 → 双引擎 commit 同判 rc1「自增会溢出」（拒绝提交）", True,
+                        all(v[0] == 1 and "自增会溢出" in v[1] for v in _rr_top.values())
+                        and len(set(_rr_top.values())) == 1))
+
+
+    # === 二十七轮修复回归组（非 BMP 同头/浮点章号闸/非 UTF-8 回退/非对象值；二十八轮随批入套） ===
+    # d38① detect [B] 同头连句以 emoji 起首 → 双引擎同判同文案（UTF-16 码元前 2 口径）
+    _ab = _nhd / "astral_b.txt"
+    _ab.write_text("😀哈喽。😀世界。😀平安。", encoding="utf-8")
+    _rr_ab = {}
+    for _e_ab in ENGINES:
+        if _e_ab == "py":
+            _c_ab = [PY, str(ROOT / "scripts" / "detect_ai_text.py"), "--input", str(_ab), "--fail-over", "1"]
+        else:
+            _c_ab = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(ROOT / "scripts" / "detect_ai_text.ps1"), "-InputFile", str(_ab), "-FailOver", "1"]
+        _pr_ab = subprocess.run(_c_ab, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"}, cwd=str(ROOT))
+        _rr_ab[_e_ab] = (_pr_ab.returncode, _nl(_decode(_pr_ab.stdout)))
+    results.append(case("[二十七轮] detect 同头连句 emoji 起首 → 双引擎同判同文案（UTF-16 码元口径，--fail-over 1）", True,
+                        len(set(_rr_ab.values())) == 1))
+    # d38② foreshadow.planted_ch=3.5 → state check 双引擎 rc1「必须是整数」（闸拦浮点章号）
+    def _ffloat(engine):
+        _pj = _nhd / f"p_ffloat_{engine}"
+        _pj.mkdir(parents=True)
+        run_state(engine, "init", "--project", str(_pj))
+        _stf = _pj / "记忆系统" / "_state.json"
+        _sj = json.loads(_stf.read_text(encoding="utf-8-sig"))
+        _sj["foreshadow"] = {"F1": {"desc": "玉佩", "planted_ch": 3.5}}
+        _stf.write_text(json.dumps(_sj, ensure_ascii=False, indent=2), encoding="utf-8")
+        _rc1, _o1 = run_state(engine, "check", "--project", str(_pj))
+        return _rc1, _nl(_o1).replace(str(_pj), "<PROJ>")
+    _rr_ff = {e: _ffloat(e) for e in ENGINES}
+    results.append(case("[二十七轮] foreshadow.planted_ch=3.5 → 双引擎 state check 同判 rc1「必须是非负整数」", True,
+                        all(v[0] == 1 and "planted_ch 必须是非负整数" in v[1] for v in _rr_ff.values())
+                        and len(set(_rr_ff.values())) == 1))
+    # d38③ 非 UTF-8（GBK）正文 → text_guard digest / fingerprint 双引擎 rc0 同口径（替换回退）
+    _gb = _nhd / "gbk_body.txt"
+    _gb.write_bytes("夜色压着山脊。".encode("gbk"))
+    _rr_gk = {}
+    for _e_gk in ENGINES:
+        if _e_gk == "py":
+            _p_g = [PY, str(ROOT / "scripts" / "fingerprint.py"), str(_gb)]
+            _t_g = [PY, str(ROOT / "scripts" / "detect_ai_text.py"), "--input", str(_gb)]
+        else:
+            _p_g = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(ROOT / "scripts" / "fingerprint.ps1"), "-Path", str(_gb), "-Json"]
+            _t_g = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(ROOT / "scripts" / "detect_ai_text.ps1"), "-InputFile", str(_gb)]
+        _pr_p = subprocess.run(_p_g, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"}, cwd=str(ROOT))
+        _pr_t = subprocess.run(_t_g, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"}, cwd=str(ROOT))
+        _rr_gk[_e_gk] = (_pr_p.returncode, _pr_t.returncode)
+    results.append(case("[二十七轮] GBK 正文 → fingerprint/detect 双引擎同判 rc0/rc0（errors=replace 回退，不裸崩）", True,
+                        len(set(_rr_gk.values())) == 1 and _rr_gk["py"] == (0, 0)))
+    # d38④ foreshadow.F1 非对象（绕闸独立运行）→ 双引擎 rc1 同文案「须为对象」
+    def _fobj(engine):
+        _pj = _nhd / f"p_fobj_{engine}"
+        _pj.mkdir(parents=True)
+        run_state(engine, "init", "--project", str(_pj))
+        _stf = _pj / "记忆系统" / "_state.json"
+        _sj = json.loads(_stf.read_text(encoding="utf-8-sig"))
+        _sj["foreshadow"] = {"F1": "串"}
+        _stf.write_text(json.dumps(_sj, ensure_ascii=False, indent=2), encoding="utf-8")
+        if engine == "ps1":
+            _c_fo = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(FS_PS1), "-Project", str(_pj)]
+        else:
+            _c_fo = [PY, str(FS_PY), "--project", str(_pj)]
+        _pr_fo = subprocess.run(_c_fo, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+        return _pr_fo.returncode, _nl(_pr_fo.stdout.decode("utf-8", "replace")).replace(str(_pj), "<PROJ>")
+    _rr_fo = {e: _fobj(e) for e in ENGINES}
+    results.append(case("[二十七轮] foreshadow.F1 非对象（独立运行）→ 双引擎 rc1 同文案「须为对象」", True,
+                        all(v[0] == 1 and "须为对象" in v[1] for v in _rr_fo.values())
+                        and len(set(_rr_fo.values())) == 1))
+
+
+    # === 二十八轮修复回归组（混合前缀同头/负数章号闸/foreshadow null 数据源/空句长表） ===
+    # d39① detect [B] 混合前缀「汉字+emoji」→ 双引擎同判同文案（悬空高位代理保留，surrogatepass）
+    _mx1 = _nhd / "mix_prefix.txt"
+    _mx1.write_text("我😀甲。我😀乙。我😀丙。", encoding="utf-8")
+    _mx2 = _nhd / "mix_diff.txt"
+    _mx2.write_text("我😀甲。我🎉乙。我😀丙。", encoding="utf-8")
+    _rr_mx = {}
+    for _e_mx in ENGINES:
+        outs = []
+        for _f_mx in (_mx1, _mx2):
+            if _e_mx == "py":
+                _c_mx = [PY, str(ROOT / "scripts" / "detect_ai_text.py"), "--input", str(_f_mx), "--fail-over", "1"]
+            else:
+                _c_mx = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(ROOT / "scripts" / "detect_ai_text.ps1"), "-InputFile", str(_f_mx), "-FailOver", "1"]
+            _pr_mx = subprocess.run(_c_mx, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"}, cwd=str(ROOT))
+            outs.append((_pr_mx.returncode, _nl(_decode(_pr_mx.stdout))))
+        _rr_mx[_e_mx] = tuple(outs)
+    results.append(case("[二十八轮] detect 同头混合前缀（汉字+emoji，含不同高位代理）→ 双引擎双夹具同判同文案", True,
+                        len(set(_rr_mx.values())) == 1))
+    # d39② resolved_ch=-1 → state check 双引擎 rc1「必须是非负整数」
+    def _fneg(engine):
+        _pj = _nhd / f"p_fneg_{engine}"
+        _pj.mkdir(parents=True)
+        run_state(engine, "init", "--project", str(_pj))
+        _stf = _pj / "记忆系统" / "_state.json"
+        _sj = json.loads(_stf.read_text(encoding="utf-8-sig"))
+        _sj["foreshadow"] = {"F1": {"desc": "玉佩", "planted_ch": 1, "resolved_ch": -1}}
+        _stf.write_text(json.dumps(_sj, ensure_ascii=False, indent=2), encoding="utf-8")
+        _rc1, _o1 = run_state(engine, "check", "--project", str(_pj))
+        return _rc1, _nl(_o1).replace(str(_pj), "<PROJ>")
+    _rr_fn = {e: _fneg(e) for e in ENGINES}
+    results.append(case("[二十八轮] resolved_ch=-1 → 双引擎 state check 同判 rc1「必须是非负整数」", True,
+                        all(v[0] == 1 and "必须是非负整数" in v[1] for v in _rr_fn.values())
+                        and len(set(_rr_fn.values())) == 1))
+    # d39③ foreshadow=null + 非空伏笔清单 → 双引擎同走清单路径（源=清单、条目一致）
+    def _fnull(engine):
+        _pj = _nhd / f"p_fnull_{engine}"
+        _pj.mkdir(parents=True)
+        run_state(engine, "init", "--project", str(_pj))
+        _stf = _pj / "记忆系统" / "_state.json"
+        _sj = json.loads(_stf.read_text(encoding="utf-8-sig"))
+        _sj["foreshadow"] = None
+        _stf.write_text(json.dumps(_sj, ensure_ascii=False, indent=2), encoding="utf-8")
+        (_pj / "记忆系统" / "圣经").mkdir(parents=True, exist_ok=True)
+        (_pj / "记忆系统" / "圣经" / "伏笔清单.md").write_text(
+            "| # | 伏笔线索 | 首现 | 状态 | 预期回收 |\n|---|---|---|---|---|\n| F1 | 玉佩之谜 | 第1章 | 🔘 已埋设 | 第5章 |\n", encoding="utf-8")
+        if engine == "ps1":
+            _c_fn = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(FS_PS1), "-Project", str(_pj)]
+        else:
+            _c_fn = [PY, str(FS_PY), "--project", str(_pj)]
+        _pr_fn = subprocess.run(_c_fn, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+        _md = _pj / "记忆系统" / "圣经" / "伏笔时间线.md"
+        return _pr_fn.returncode, _nl(_pr_fn.stdout.decode("utf-8", "replace")).replace(str(_pj), "<PROJ>"), (_md.read_text(encoding="utf-8") if _md.is_file() else "")
+    _rr_fnn = {e: _fnull(e) for e in ENGINES}
+    results.append(case("[二十八轮] foreshadow=null + 非空伏笔清单 → 双引擎同走清单路径 rc0 产物一致", True,
+                        all(v[0] == 0 for v in _rr_fnn.values())
+                        and len(set(_rr_fnn.values())) == 1 and "玉佩" in _rr_fnn["py"][2]))
+    # d39④ 全句 ≥300 单元 → fingerprint 双引擎 rc1 中文「无可统计句子」（不裸崩）
+    _long = _nhd / "long_sent.txt"
+    _long.write_text("这是一段很长的句子" * 60 + "。", encoding="utf-8")
+    _rr_ls = {}
+    for _e_ls in ENGINES:
+        if _e_ls == "py":
+            _c_ls = [PY, str(ROOT / "scripts" / "fingerprint.py"), str(_long)]
+        else:
+            _c_ls = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(ROOT / "scripts" / "fingerprint.ps1"), "-Path", str(_long), "-Json"]
+        _pr_ls = subprocess.run(_c_ls, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"}, cwd=str(ROOT))
+        _rr_ls[_e_ls] = (_pr_ls.returncode, _nl(_decode(_pr_ls.stdout) + _decode(_pr_ls.stderr)))
+    results.append(case("[二十八轮] 全句≥300 单元 → fingerprint 双引擎 rc1 中文「无可统计句子」（不裸崩）", True,
+                        all(v[0] == 1 and "无可统计句子" in v[1] for v in _rr_ls.values())
+                        and len(set(_rr_ls.values())) == 1))
+    # d39⑤ 独立运行 planted_ch="3.5" 字符串 → 双引擎截断为 3 同文案 rc0（py float 强转对齐 ps1 Truncate）
+    def _fstr(engine):
+        _pj = _nhd / f"p_fstr_{engine}"
+        _pj.mkdir(parents=True)
+        run_state(engine, "init", "--project", str(_pj))
+        _stf = _pj / "记忆系统" / "_state.json"
+        _sj = json.loads(_stf.read_text(encoding="utf-8-sig"))
+        _sj["foreshadow"] = {"F1": {"desc": "玉佩", "planted_ch": "3.5", "planned_resolve_ch": 5}}
+        _stf.write_text(json.dumps(_sj, ensure_ascii=False, indent=2), encoding="utf-8")
+        if engine == "ps1":
+            _c_fs2 = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(FS_PS1), "-Project", str(_pj)]
+        else:
+            _c_fs2 = [PY, str(FS_PY), "--project", str(_pj)]
+        _pr_fs2 = subprocess.run(_c_fs2, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+        _md = _pj / "记忆系统" / "圣经" / "伏笔时间线.md"
+        return _pr_fs2.returncode, _nl(_pr_fs2.stdout.decode("utf-8", "replace")).replace(str(_pj), "<PROJ>"), (_md.read_text(encoding="utf-8") if _md.is_file() else "")
+    _rr_fs2 = {e: _fstr(e) for e in ENGINES}
+    results.append(case("[二十八轮] 独立运行 planted_ch=\"3.5\" → 双引擎截断 3 同文案 rc0 产物一致", True,
+                        all(v[0] == 0 for v in _rr_fs2.values())
+                        and len(set(_rr_fs2.values())) == 1 and "第3章" in _rr_fs2["py"][2]))
+
+
+    # === 二十九轮修复回归组（foreshadow 边界归一/init 契约/空键/纯标点指纹） ===
+    # d40① foreshadow 边界四态（planned=-5 / planted="" / desc=null / 独立运行）→ 双引擎产物逐字一致
+    def _fedge(engine):
+        _pj = _nhd / f"p_fedge_{engine}"
+        _pj.mkdir(parents=True)
+        run_state(engine, "init", "--project", str(_pj))
+        (_pj / "正文").mkdir(exist_ok=True)
+        (_pj / "正文" / "第010章_试炼.txt").write_text("夜色压着山脊。", encoding="utf-8")
+        _stf = _pj / "记忆系统" / "_state.json"
+        _sj = json.loads(_stf.read_text(encoding="utf-8-sig"))
+        _sj["foreshadow"] = {"F1": {"desc": None, "planted_ch": "", "planned_resolve_ch": -5}}
+        _stf.write_text(json.dumps(_sj, ensure_ascii=False, indent=2), encoding="utf-8")
+        if engine == "ps1":
+            _c_fe = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(FS_PS1), "-Project", str(_pj)]
+        else:
+            _c_fe = [PY, str(FS_PY), "--project", str(_pj)]
+        _pr_fe = subprocess.run(_c_fe, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+        _md = _pj / "记忆系统" / "圣经" / "伏笔时间线.md"
+        return _pr_fe.returncode, _nl(_pr_fe.stdout.decode("utf-8", "replace")).replace(str(_pj), "<PROJ>"), (_md.read_text(encoding="utf-8") if _md.is_file() else "")
+    _rr_fe = {e: _fedge(e) for e in ENGINES}
+    results.append(case("[二十九轮] foreshadow 边界（desc=null/planted=\"\"/planned=-5）→ 双引擎 rc0 产物逐字一致", True,
+                        all(v[0] == 0 for v in _rr_fe.values())
+                        and len(set(_rr_fe.values())) == 1))
+    # d40② --current-ch 负数 → 双引擎视为未传（当前章=探测值）同文案
+    def _fnegcur(engine):
+        _pj = _nhd / f"p_fnc_{engine}"
+        _pj.mkdir(parents=True)
+        run_state(engine, "init", "--project", str(_pj))
+        (_pj / "正文").mkdir(exist_ok=True)
+        (_pj / "正文" / "第010章_试炼.txt").write_text("夜色压着山脊。", encoding="utf-8")
+        _stf = _pj / "记忆系统" / "_state.json"
+        _sj = json.loads(_stf.read_text(encoding="utf-8-sig"))
+        _sj["foreshadow"] = {"F1": {"desc": "玉佩", "planted_ch": 1, "planned_resolve_ch": 8}}
+        _stf.write_text(json.dumps(_sj, ensure_ascii=False, indent=2), encoding="utf-8")
+        if engine == "ps1":
+            _c_fc = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(FS_PS1), "-Project", str(_pj), "-CurrentCh", "-3"]
+        else:
+            _c_fc = [PY, str(FS_PY), "--project", str(_pj), "--current-ch", "-3"]
+        _pr_fc = subprocess.run(_c_fc, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+        return _pr_fc.returncode, _nl(_pr_fc.stdout.decode("utf-8", "replace")).replace(str(_pj), "<PROJ>")
+    _rr_fc = {e: _fnegcur(e) for e in ENGINES}
+    results.append(case("[二十九轮] --current-ch=-3 → 双引擎视为未传同文案（当前章=探测值）", True,
+                        len(set(_rr_fc.values())) == 1 and "第10章" in _rr_fc["py"][1]))
+    # d40③ init facts 非数组 → 双引擎 rc1「facts 须为数组」
+    _iarr_seq = {"n": 0}
+
+    def _iarr(engine, payload):
+        _iarr_seq["n"] += 1
+        _pj = _nhd / f"p_iarr_{engine}_{_iarr_seq['n']}"
+        _pj.mkdir(parents=True)
+        _inp = _pj / "in.json"
+        _inp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        if engine == "ps1":
+            _c_ia = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(ROOT / "scripts" / "state_commit.ps1"), "init", "-Project", str(_pj), "-InputFile", str(_inp)]
+        else:
+            _c_ia = [PY, str(ROOT / "scripts" / "state_commit.py"), "init", "--project", str(_pj), "--input", str(_inp)]
+        _pr_ia = subprocess.run(_c_ia, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+        return _pr_ia.returncode, _nl(_pr_ia.stdout.decode("utf-8", "replace")).replace(str(_pj), "<PROJ>")
+    _rr_fa = {e: _iarr(e, {"facts": "notalist"}) for e in ENGINES}
+    results.append(case("[二十九轮] init facts=字符串 → 双引擎 rc1「facts 须为数组」（契约统一）", True,
+                        all(v[0] == 1 and "facts 须为数组" in v[1] for v in _rr_fa.values())
+                        and len(set(_rr_fa.values())) == 1))
+    _rr_ov = {e: _iarr(e, {"overview": "notanobject"}) for e in ENGINES}
+    results.append(case("[二十九轮] init overview=字符串 → 双引擎 rc1「overview 须为对象」（无键污染）", True,
+                        all(v[0] == 1 and "overview 须为对象" in v[1] for v in _rr_ov.values())
+                        and len(set(_rr_ov.values())) == 1))
+    # d40④ 空键名 characters → 双引擎 rc1「键名不能为空」
+    _rr_ek = {e: _iarr(e, {"characters": {"": {"snapshot": "s"}}}) for e in ENGINES}
+    results.append(case("[二十九轮] characters 空键名 → 双引擎 rc1 且各自中文点名（py 键名不能为空 / ps1 输入 JSON 空键名）", True,
+                        _rr_ek["py"][0] == 1 and "键名不能为空" in _rr_ek["py"][1]
+                        and _rr_ek["ps1"][0] == 1 and "空键名" in _rr_ek["ps1"][1]))
+    # d40⑤ 纯标点正文（逗号句）→ fingerprint 双引擎 rc0 且逗号均值=0（不裸崩）
+    _pt = _nhd / "punct.txt"
+    _pt.write_text("，，，。", encoding="utf-8")
+    _rr_pt = {}
+    for _e_pt in ENGINES:
+        if _e_pt == "py":
+            _c_pt = [PY, str(ROOT / "scripts" / "fingerprint.py"), str(_pt)]
+        else:
+            _c_pt = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(ROOT / "scripts" / "fingerprint.ps1"), "-Path", str(_pt), "-Json"]
+        _pr_pt = subprocess.run(_c_pt, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"}, cwd=str(ROOT))
+        _rr_pt[_e_pt] = (_pr_pt.returncode, _pr_pt.stdout.decode("utf-8", "replace"))
+    _pt_norm = []
+    for _v_pt in _rr_pt.values():
+        try:
+            _pt_norm.append({k: (float(x) if isinstance(x, (int, float)) else x) for k, x in json.loads(_v_pt[1]).items()})
+        except Exception:
+            _pt_norm.append(None)
+    results.append(case("[二十九轮] 纯标点正文 → fingerprint 双引擎 rc0 解析值全等且逗号均值=0（不裸崩；JSON 格式差归一）", True,
+                        all(v[0] == 0 for v in _rr_pt.values())
+                        and None not in _pt_norm and _pt_norm[0] == _pt_norm[1]
+                        and _pt_norm[0].get("逗号间均值") == 0.0))
+
+
+    # === 三十一轮修复回归组（Container 闸/参数错误收口/CmdletBinding/缺文件） ===
+    # d41① state_commit -Project 指向普通文件 → 双引擎 rc1 同文案「项目目录不存在」（Container 判定）
+    _pf = _nhd / "afile.txt"
+    _pf.write_text("x", encoding="utf-8")
+    _rr_pf = {}
+    for _e_pf in ENGINES:
+        if _e_pf == "py":
+            _c_pf = [PY, str(ROOT / "scripts" / "state_commit.py"), "init", "--project", str(_pf)]
+        else:
+            _c_pf = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(ROOT / "scripts" / "state_commit.ps1"), "init", "-Project", str(_pf)]
+        _pr_pf = subprocess.run(_c_pf, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+        _rr_pf[_e_pf] = (_pr_pf.returncode, _nl(_decode(_pr_pf.stdout)).replace(str(_pf), "<PROJ>"))
+    results.append(case("[三十一轮] state_commit -Project 普通文件 → 双引擎 rc1 同文案「项目目录不存在」（Container 闸）", True,
+                        all(v[0] == 1 and "项目目录不存在" in v[1] for v in _rr_pf.values())
+                        and len(set(_rr_pf.values())) == 1))
+    # d41② 四脚本未知参数 → py rc1 中文「参数错误」（对齐 ps1 rc1，不再 rc2 撞业务码）
+    _rr_ap = {}
+    for _mod in ("state_commit.py", "text_guard.py", "foreshadow_timeline.py", "package_skill.py"):
+        _pr_ap = subprocess.run([PY, str(ROOT / "scripts" / _mod), "--definitely-not-a-flag"], capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"}, cwd=str(ROOT))
+        _rr_ap[_mod] = (_pr_ap.returncode, _nl(_decode(_pr_ap.stdout) + _decode(_pr_ap.stderr)))
+    results.append(case("[三十一轮] 四脚本未知参数 → py 均 rc1 中文「参数错误」（不再 rc2 与业务 rc2 撞码）", True,
+                        all(v[0] == 1 and "参数错误" in v[1] for v in _rr_ap.values())))
+    # d41③ audit.ps1 未知旗标 → 双引擎 rc1（CmdletBinding，不再静默吞进 $args fail-open）
+    _c_au = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(ROOT / ".github/scripts" / "audit.ps1"), "-Root", str(ROOT), "-NoSuchParam"]
+    _pr_au = subprocess.run(_c_au, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+    results.append(case("[三十一轮] audit.ps1 未知旗标 → rc1（CmdletBinding 防静默吞参 fail-open）", True,
+                        _pr_au.returncode == 1))
+    # d41④ fingerprint 缺文件 / detect 目录输入 → 双引擎 rc1 同文案（中文，不裸崩）
+    _miss = _nhd / "no_such_file.txt"
+    _rr_mf = {}
+    for _e_mf in ENGINES:
+        if _e_mf == "py":
+            _c_mf = [PY, str(ROOT / "scripts" / "fingerprint.py"), str(_miss)]
+        else:
+            _c_mf = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(ROOT / "scripts" / "fingerprint.ps1"), "-Path", str(_miss), "-Json"]
+        _pr_mf = subprocess.run(_c_mf, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"}, cwd=str(ROOT))
+        _rr_mf[_e_mf] = (_pr_mf.returncode, _nl(_decode(_pr_mf.stdout) + _decode(_pr_mf.stderr)))
+    results.append(case("[三十一轮] fingerprint 缺文件 → 双引擎 rc1 各自中文「文件不存在」（py 不再裸 traceback）", True,
+                        all(v[0] == 1 and "文件不存在" in v[1] for v in _rr_mf.values())))
+
+
+    # === 三十一轮修复回归组·续（audit.ps1 变异检出钉死） ===
+    # d42① 顺序闸：围栏外错序句（含「无论」前缀与「后」变体）→ rc1 且点名「顺序一致性」
+    _ord_forms = ("流程要求：无论 PASS/FAIL，先修复再朱雀，然后再跑 4.1b–4.1e。",
+                  "流程要求：先修复后朱雀，然后再跑 4.1b–4.1e。")
+    for _oi, _op in enumerate(_ord_forms):
+        _od = Path(tempfile.mkdtemp(prefix="audit-ord-"))
+        shutil.copytree(ROOT, _od / "r", ignore=shutil.ignore_patterns(".git", "dist", "__pycache__", ".suite-tmp"))
+        _orf = _od / "r" / "modules" / "03_26_功能模块.md"
+        _orf.write_text(_orf.read_text(encoding="utf-8") + f"\n\n{_op}\n", encoding="utf-8")
+        _bo = subprocess.run([PY, str(_od / "r" / "scripts" / "check-doc-budget.py"), "--print-baseline", "--root", str(_od / "r")], capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+        _bt = _decode(_bo.stdout)
+        _bjf = _od / "r" / "scripts" / "doc-budget.json"
+        _bcfg = json.loads(_bjf.read_text(encoding="utf-8-sig"))
+        _bcfg["baseline"]["worst_path_chars"] = int(re.search(r"最坏路径 ([\d,]+)", _bt).group(1).replace(",", ""))
+        for _bk, _bl in (("writer_delegated_chars", "写手委派"), ("session_resident_chars", "主会话常驻"), ("precheck_path_chars", "写前预检")):
+            _bm = re.search(_bl + r"[^\d]*([\d,]+)", _bt)
+            if _bm:
+                _bcfg["baseline"][_bk] = int(_bm.group(1).replace(",", ""))
+        _msm = re.search(r"(modules/03_26_功能模块\.md)\s+([\d,]+)/", _bt)
+        _bcfg["baseline"]["max_single_file"] = f"{_msm.group(1)}={int(_msm.group(2).replace(',', ''))}"
+        _bjf.write_text(json.dumps(_bcfg, ensure_ascii=False, indent=2), encoding="utf-8")
+        _pr_ord = subprocess.run([PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(_od / "r" / ".github/scripts" / "audit.ps1"), "-Root", str(_od / "r")], capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+        results.append(case(f"[三十一轮] audit 顺序闸变异{_oi + 1}（错序句{_op[:10]}…）→ rc1 且点名「顺序一致性」", True,
+                            _pr_ord.returncode == 1 and "顺序一致性" in _decode(_pr_ord.stdout)))
+        shutil.rmtree(_od, ignore_errors=True)
+    # d42② 孤儿文件变异 → -StrictOrphan rc1 点名；版本漂移变异 → rc1 点名
+    def _audit_mut(name, mutate, needle):
+        _md2 = Path(tempfile.mkdtemp(prefix=f"audit-{name}-"))
+        shutil.copytree(ROOT, _md2 / "r", ignore=shutil.ignore_patterns(".git", "dist", "__pycache__", ".suite-tmp"))
+        mutate(_md2 / "r")
+        _pr2 = subprocess.run([PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(_md2 / "r" / ".github/scripts" / "audit.ps1"), "-Root", str(_md2 / "r"), "-StrictOrphan"], capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+        _out2 = _decode(_pr2.stdout)
+        shutil.rmtree(_md2, ignore_errors=True)
+        return _pr2.returncode == 1 and needle in _out2
+    results.append(case("[三十一轮] audit 孤儿变异（templates 游离件）→ -StrictOrphan rc1 点名「孤儿文件」", True,
+                        _audit_mut("orphan", lambda r: (r / "templates" / "zz_orphan_probe.md").write_text("x", encoding="utf-8"), "孤儿文件")))
+    def _ver_mut(r):
+        _sk = r / "SKILL.md"
+        _cur = re.search(r"version:\s*([\d.]+)", (ROOT / "SKILL.md").read_text(encoding="utf-8")).group(1)  # 动态取当前版本（升版后不脱靶）
+        _sk.write_text(_sk.read_text(encoding="utf-8").replace(f"version: {_cur}", "version: 9.9.9"), encoding="utf-8")
+    results.append(case("[三十一轮] audit 版本漂移变异（SKILL 9.9.9）→ rc1 点名版本", True,
+                        _audit_mut("ver", _ver_mut, "9.9.9")))
+
+
+    # === 三十二轮修复回归组（perl 降级路径空集/档位豁免/foreshadow 顶层数值/check-done 归因顺序） ===
+    # d43① fingerprint.byte.pl 空白-only → rc1 中文（除零护栏，不再 rc255 英文）
+    _d43 = _nhd / "d43"
+    _d43.mkdir(exist_ok=True)
+    (_d43 / "blank.txt").write_text("   \n\t\n", encoding="utf-8")
+    (_d43 / "long.txt").write_text("这是一句超过三百字的句子。" * 25, encoding="utf-8")
+    (_d43 / "comma.txt").write_text("，，，，，", encoding="utf-8")
+    (_d43 / "one.txt").write_text("标题行\n第一段正文，有一些内容。\n", encoding="utf-8")
+    (_d43 / "title_only.txt").write_text("标题行\n", encoding="utf-8")  # 跳行后为空的形态
+    _pr_b1 = subprocess.run(["perl", str(ROOT / "scripts" / "fingerprint.byte.pl"), str(_d43 / "blank.txt")], capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+    _pr_b2 = subprocess.run(["perl", str(ROOT / "scripts" / "fingerprint.byte.pl"), str(_d43 / "long.txt")], capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+    _pr_b3 = subprocess.run(["perl", str(ROOT / "scripts" / "fingerprint.byte.pl"), str(_d43 / "one.txt"), "--skip-first"], capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+    results.append(case("[三十二轮] byte.pl 三空集+跳行后空 → rc1 中文或 rc0（不再除零 rc255）", True,
+                        _pr_b1.returncode == 1 and "无可统计段落" in _decode(_pr_b1.stdout)
+                        and _pr_b2.returncode in (0, 1) and _pr_b3.returncode in (0, 1)))
+    # d43② wordfreq.byte.pl：单行 --skip-first rc1（同文案不再 rc255）+ 正常类超高频不打 ❌（cap=99 豁免）
+    (_d43 / "sudd.txt").write_text("突然" * 200, encoding="utf-8")
+    _pr_w1 = subprocess.run(["perl", str(ROOT / "scripts" / "wordfreq.byte.pl"), str(_d43 / "title_only.txt"), "--skip-first"], capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+    _pr_w2 = subprocess.run(["perl", str(ROOT / "scripts" / "wordfreq.byte.pl"), str(_d43 / "sudd.txt")], capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+    results.append(case("[三十二轮] wordfreq 跳行后空 rc1 + 正常类「突然」超高频不打❌（03_26 正常类不检查）", True,
+                        _pr_w1.returncode == 1
+                        and _pr_w2.returncode == 0 and "❌" not in _decode(_pr_w2.stdout)))
+    # d43③ foreshadow 顶层数值/数组/截断 JSON → 双引擎 rc1 同文案
+    for _si, (_sname, _sbody) in enumerate((("fs_int", '{"foreshadow": 42}'), ("fs_arr", "[1,2,3]"), ("fs_bad", '{"foreshadow": {"a"'))):
+        _pj43 = _nhd / f"d43_{_sname}"
+        (_pj43 / "记忆系统").mkdir(parents=True, exist_ok=True)
+        (_pj43 / "记忆系统" / "_state.json").write_text(_sbody, encoding="utf-8")
+        _rr43 = {}
+        for _e43 in ENGINES:
+            if _e43 == "py":
+                _c43 = [PY, str(ROOT / "scripts" / "foreshadow_timeline.py"), "--project", str(_pj43)]
+            else:
+                _c43 = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(ROOT / "scripts" / "foreshadow_timeline.ps1"), "-Project", str(_pj43)]
+            _pr43 = subprocess.run(_c43, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+            _rr43[_e43] = (_pr43.returncode, _nl(_decode(_pr43.stdout)).strip())
+        results.append(case(f"[三十二轮] foreshadow 顶层{_sname} → 双引擎 rc1 同文案（顶层数值判型/损坏 rc1，不再 ps1 fail-open）", True,
+                            all(v[0] == 1 and "❌" in v[1] for v in _rr43.values())
+                            and len(set(_rr43.values())) == 1))
+    # d43④ check-done 复合故障（项目不存在+规则损坏副本仓）→ 双引擎首条归因「项目目录不存在」
+    _repo43 = _nhd / "d43repo"
+    shutil.copytree(ROOT, _repo43, ignore=shutil.ignore_patterns(".git", "dist", "__pycache__", ".suite-tmp"))
+    (_repo43 / ".github" / "scripts" / "check-done-rules.json").write_text("{broken", encoding="utf-8")
+    _rr44 = {}
+    for _e44 in ENGINES:
+        if _e44 == "py":
+            _c44 = [PY, str(_repo43 / "scripts" / "check-done.py"), "--project", str(_repo43 / "nope"), "--chapter", "1"]
+        else:
+            _c44 = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(_repo43 / "scripts" / "check-done.ps1"), "-Project", str(_repo43 / "nope"), "-Chapter", "1"]
+        _pr44 = subprocess.run(_c44, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+        _rr44[_e44] = (_pr44.returncode, [l for l in _decode(_pr44.stdout).splitlines() if "❌" in l][:1])
+    shutil.rmtree(_repo43, ignore_errors=True)
+    results.append(case("[三十二轮] check-done 复合故障（项目缺失+规则损坏）→ 双引擎首条归因「项目目录不存在」（惰性规则加载）", True,
+                        all(v[0] == 1 and v[1] and "项目目录不存在" in v[1][0] for v in _rr44.values())))
+
+
+    # === 三十三轮修复回归组（目录冒充正文/Int64 收口/单源损坏中文/参数面收口/input 归因） ===
+    # d44① 正文 .txt 为目录 → 双引擎 rc1 同文案（不再 ps1 fail-open rc0）
+    _d44 = _nhd / "d44"
+    _pj44 = _d44 / "pj"
+    (_pj44 / ".done").mkdir(parents=True, exist_ok=True)
+    (_pj44 / "正文").mkdir(exist_ok=True)
+    (_pj44 / "报告").mkdir(exist_ok=True)
+    (_pj44 / "正文" / "第001章_测试.txt").mkdir(exist_ok=True)
+    import json as _json44
+    _rules44 = _json44.loads((ROOT / "scripts" / "check-done-rules.json").read_text(encoding="utf-8-sig"))
+    for _mk44 in _rules44["base_marks"]:
+        (_pj44 / ".done" / f"第001章_{_mk44}.done").write_bytes(b"")
+    (_pj44 / ".done" / "第001章_chapter.done").write_bytes(b"")
+    (_pj44 / "报告" / "第001章_全量审核报告.md").write_text(
+        "## 人工证据包\n人工段注入：第3段，≥300字，合计1200字。结构破坏。段落位置：第3段。\n", encoding="utf-8")
+    _rr44a = {}
+    for _e44a in ENGINES:
+        if _e44a == "py":
+            _c44a = [PY, str(ROOT / "scripts" / "check-done.py"), "--project", str(_pj44), "--chapter", "1"]
+        else:
+            _c44a = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(ROOT / "scripts" / "check-done.ps1"), "-Project", str(_pj44), "-Chapter", "1"]
+        _pr44a = subprocess.run(_c44a, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+        _rr44a[_e44a] = (_pr44a.returncode, _nl(_decode(_pr44a.stdout)).strip())
+    results.append(case("[三十三轮] 正文 .txt 为目录 → 双引擎 rc1 同文案「正文候选路径是目录」（ps1 不再 fail-open）", True,
+                        all(v[0] == 1 and "正文候选路径是目录" in v[1] for v in _rr44a.values())
+                        and len(set(_rr44a.values())) == 1))
+    # d44② 五脚本整数参数超 Int64/非十进制 → py rc1 中文「参数错误」（对齐 ps1 绑定失败 rc1）
+    _cases44 = (("detect_ai_text.py", "--fail-over 1e20 -i nope.txt"),
+                ("text_guard.py", "verify -c 1e20 --project nope"),
+                ("foreshadow_timeline.py", "--current-ch 1e20 --project nope"),
+                ("state_commit.py", "draft --chapter 1e20 --project nope"),
+                ("check-done.py", "-c 100000000000000000000 --project nope"))
+    _rr45 = {}
+    for _f44, _a44 in _cases44:
+        _pr44b = subprocess.run(f'"{PY}" "{ROOT / "scripts" / _f44}" {_a44}', shell=True, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"}, cwd=str(ROOT))
+        _rr45[_f44] = (_pr44b.returncode, _decode(_pr44b.stdout) + _decode(_pr44b.stderr))
+    results.append(case("[三十三轮] 五脚本 Int64 超界/非十进制 → py 均 rc1 中文「参数错误」（detect/text_guard/foreshadow/state_commit/check-done）", True,
+                        all(v[0] == 1 and "参数错误" in v[1] for v in _rr45.values())))
+    # d44③ text_guard 规则单源损坏/账本损坏 → 双引擎 rc1 同文案（中文，不裸 traceback）
+    def _tg_mut(name, mutate, needle):
+        _md46 = Path(tempfile.mkdtemp(prefix=f"tg-{name}-"))
+        shutil.copytree(ROOT, _md46 / "r", ignore=shutil.ignore_patterns(".git", "dist", "__pycache__", ".suite-tmp"))
+        mutate(_md46 / "r")
+        _rr46 = {}
+        for _e46 in ENGINES:
+            if _e46 == "py":
+                _c46 = [PY, str(_md46 / "r" / "scripts" / "text_guard.py"), "digest", "--project", str(_md46 / "r"), "--chapter", "1"]
+            else:
+                _c46 = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(_md46 / "r" / "scripts" / "text_guard.ps1"), "-Command", "digest", "-Project", str(_md46 / "r"), "-Chapter", "1"]
+            _pr46 = subprocess.run(_c46, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+            _rr46[_e46] = (_pr46.returncode, _nl(_decode(_pr46.stdout)).strip())
+        shutil.rmtree(_md46, ignore_errors=True)
+        return all(v[0] == 1 and needle in v[1] for v in _rr46.values()) and len(set(_rr46.values())) == 1
+    results.append(case("[三十三轮] text_guard 规则单源损坏 → 双引擎 rc1 同文案「规则单源解析失败」", True,
+                        _tg_mut("rules", lambda r: (r / "scripts" / "check-done-rules.json").write_text("{broken", encoding="utf-8"), "规则单源解析失败")))
+    def _tg_ledger(r):
+        # project = r 本身（与 _tg_mut 调用一致），账本须落在 r/.story/ 下
+        (r / ".story").mkdir(parents=True, exist_ok=True)
+        (r / ".story" / "text-digests.json").write_text("{broken", encoding="utf-8")
+    results.append(case("[三十三轮] text_guard 账本损坏 → 双引擎 rc1 同文案「账本 JSON 损坏」", True,
+                        _tg_mut("ledger", _tg_ledger, "账本 JSON 损坏")))
+    # d44④ fingerprint 多余参数 → py/ps1/perl 均 rc1（不再静默忽略）；perl 未知旗标 rc1
+    _rr48 = {}
+    _pr48a = subprocess.run([PY, str(ROOT / "scripts" / "fingerprint.py"), str(_d43 / "blank.txt"), "--bogus"], capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"}, cwd=str(ROOT))
+    _rr48["py多参"] = _pr48a.returncode
+    _pr48b = subprocess.run([PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(ROOT / "scripts" / "fingerprint.ps1"), "-Path", str(_d43 / "blank.txt"), "-Bad"], capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+    _rr48["ps1未知旗标"] = _pr48b.returncode
+    for _pf48 in ("fingerprint.pl", "fingerprint.byte.pl", "wordfreq.byte.pl"):
+        _pr48c = subprocess.run(["perl", str(ROOT / "scripts" / _pf48), str(_d43 / "blank.txt"), "--bogus"], capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+        _rr48[_pf48] = _pr48c.returncode
+    results.append(case("[三十三轮] fingerprint 多余参数/未知旗标 → py/ps1/perl 均 rc1（不再静默忽略）", True,
+                        all(v == 1 for v in _rr48.values())))
+    # d44⑤ state_commit --input 为目录/损坏 JSON → 双引擎 rc1 同文案
+    _in44 = _d44 / "indir"
+    _in44.mkdir(exist_ok=True)
+    (_d44 / "pj49").mkdir(exist_ok=True)  # 项目目录须存在，否则两引擎先报「项目目录不存在」（先于 input 检查）
+    _rr49 = {}
+    for _e49 in ENGINES:
+        if _e49 == "py":
+            _c49 = [PY, str(ROOT / "scripts" / "state_commit.py"), "init", "--project", str(_d44 / "pj49"), "--input", str(_in44)]
+        else:
+            _c49 = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(ROOT / "scripts" / "state_commit.ps1"), "init", "-Project", str(_d44 / "pj49"), "-InputFile", str(_in44)]
+        _pr49 = subprocess.run(_c49, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+        _rr49[_e49] = (_pr49.returncode, _nl(_decode(_pr49.stdout)).strip())
+    results.append(case("[三十三轮] state_commit --input 为目录 → 双引擎 rc1 同文案「输入不存在」（Leaf 判定）", True,
+                        all(v[0] == 1 and "输入不存在" in v[1] for v in _rr49.values())
+                        and len(set(_rr49.values())) == 1))
+
+
+    # === 三十四轮修复回归组（JSON 顶层非对象一族：init/check/foreshadow/text_guard/_i64 收紧） ===
+    # d45① state_commit init --input 顶层非对象 → 双引擎 rc1 同文案且不落盘（原 ps1 fail-open rc0）
+    for _bi, (_bname, _bbody) in enumerate((("arr", "[]"), ("str", '"x"'), ("num", "12"))):
+        _ind45 = _nhd / f"d45in_{_bname}.json"
+        _ind45.write_text(_bbody, encoding="utf-8")
+        _pj45 = _nhd / f"d45pj_{_bname}"
+        _pj45.mkdir(exist_ok=True)
+        _rr45a = {}
+        for _e45a in ENGINES:
+            if _e45a == "py":
+                _c45a = [PY, str(ROOT / "scripts" / "state_commit.py"), "init", "--project", str(_pj45), "--input", str(_ind45)]
+            else:
+                _c45a = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(ROOT / "scripts" / "state_commit.ps1"), "init", "-Project", str(_pj45), "-InputFile", str(_ind45)]
+            _pr45a = subprocess.run(_c45a, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+            _rr45a[_e45a] = (_pr45a.returncode, _nl(_decode(_pr45a.stdout)).strip())
+        results.append(case(f"[三十四轮] init --input 顶层{_bname} 非对象 → 双引擎 rc1 同文案且不落盘", True,
+                            all(v[0] == 1 and "init 输入须为 JSON 对象" in v[1] for v in _rr45a.values())
+                            and len(set(_rr45a.values())) == 1
+                            and not (_pj45 / "记忆系统" / "_state.json").exists()))
+    # d45② _state.json 顶层非对象 → check 双引擎（py+ps51 三引擎）同文案 rc1（不再 py 裸 traceback / ps1 双宿主分叉）
+    for _sj, (_sname, _sbody) in enumerate((("empty_arr", "[]"), ("arr2", "[1,2]"), ("str", '"x"'))):
+        _pj45b = _nhd / f"d45state_{_sname}"
+        (_pj45b / "记忆系统").mkdir(parents=True, exist_ok=True)
+        (_pj45b / "记忆系统" / "_state.json").write_text(_sbody, encoding="utf-8")
+        _rr45b = {}
+        for _e45b in ENGINES:
+            if _e45b == "py":
+                _c45b = [PY, str(ROOT / "scripts" / "state_commit.py"), "check", "--project", str(_pj45b)]
+            else:
+                _c45b = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(ROOT / "scripts" / "state_commit.ps1"), "check", "-Project", str(_pj45b)]
+            _pr45b = subprocess.run(_c45b, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+            _rr45b[_e45b] = (_pr45b.returncode, _nl(_decode(_pr45b.stdout)).strip())
+        results.append(case(f"[三十四轮] check _state 顶层{_sname} → 双引擎 rc1 同文案「不是 JSON 对象」（判型硬按类型全名，PS5.1 数组怪癖覆盖）", True,
+                            all(v[0] == 1 and "状态单不是 JSON 对象" in v[1] for v in _rr45b.values())
+                            and len(set(_rr45b.values())) == 1))
+    def _tg_top2(kind, needle):
+        _md45 = Path(tempfile.mkdtemp(prefix=f"tg45-{kind}-"))
+        shutil.copytree(ROOT, _md45 / "r", ignore=shutil.ignore_patterns(".git", "dist", "__pycache__", ".suite-tmp"))
+        if kind.startswith("ledger"):
+            (_md45 / "r" / ".story").mkdir(parents=True, exist_ok=True)
+            (_md45 / "r" / ".story" / "text-digests.json").write_text("[]", encoding="utf-8")
+            _cmd45 = ("digest", "--project", str(_md45 / "r"), "--chapter", "1"), ("-Command", "digest", "-Project", str(_md45 / "r"), "-Chapter", "1")
+        else:
+            (_md45 / "r" / "scripts" / "check-done-rules.json").write_text("[]", encoding="utf-8")
+            _cmd45 = ("digest", "--project", str(_md45 / "r"), "--chapter", "1"), ("-Command", "digest", "-Project", str(_md45 / "r"), "-Chapter", "1")
+        _rr45d = {}
+        for _e45d in ENGINES:
+            _c45d = ([PY, str(_md45 / "r" / "scripts" / "text_guard.py")] + list(_cmd45[0])
+                     if _e45d == "py"
+                     else [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(_md45 / "r" / "scripts" / "text_guard.ps1")] + list(_cmd45[1]))
+            _pr45d = subprocess.run(_c45d, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+            _rr45d[_e45d] = (_pr45d.returncode, _nl(_decode(_pr45d.stdout)).strip())
+        shutil.rmtree(_md45, ignore_errors=True)
+        return all(v[0] == 1 and needle in v[1] for v in _rr45d.values()) and len(set(_rr45d.values())) == 1
+    # d45③ text_guard 账本/规则单顶层非对象 → 双引擎 rc1 同文案（原 py 裸崩 / ps1 rc2「无记录」误导）
+    results.append(case("[三十四轮] text_guard 账本顶层[] → 双引擎 rc1 同文案「账本须为 JSON 对象」（不再 ps1 误判无记录 rc2）", True,
+                        _tg_top2("ledger_arr", "账本须为 JSON 对象")))
+    results.append(case("[三十四轮] text_guard 规则单顶层[] → 双引擎 rc1 同文案「规则单源解析失败」（不再 KeyError 裸崩 / ps1 rc2 误导）", True,
+                        _tg_top2("rules_arr", "规则单源解析失败")))
+
+
+    # === 三十五轮修复回归组（ps1 整数宽松形态收口 / perl 上中位 / foreshadow 超界 / NOTICE 入包） ===
+    # d46① 整数参数宽松形态（+5/1e3/0x10/前导空格）→ 三引擎 rc1（ps1 [long] 原静默转换与 py _i64 反向）
+    _rr46 = {}
+    for _v46 in ("+5", "1e3", "0x10", " 5"):
+        for _e46 in ENGINES:
+            if _e46 == "py":
+                _c46 = [PY, str(ROOT / "scripts" / "check-done.py"), "-c", _v46, "--project", "nope"]
+            else:
+                _c46 = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(ROOT / "scripts" / "check-done.ps1"), "-Chapter", _v46, "-Project", "nope"]
+            _pr46 = subprocess.run(_c46, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+            _out46 = _decode(_pr46.stdout) + _decode(_pr46.stderr)
+            _rr46[f"{_e46}:{_v46}"] = (_pr46.returncode, "参数错误" in _out46)
+    results.append(case("[三十五轮] 整数宽松形态 +5/1e3/0x10/空格前缀 → 双引擎均 rc1「参数错误」（ps1 前置守卫，不再 [long] 静默转换）", True,
+                        all(v[0] == 1 and v[1] for v in _rr46.values())))
+    # d46② 合法整数 007/5 → 守卫不误伤（rc=业务 rc1「项目目录不存在」而非参数错误）
+    _rr47 = {}
+    for _v47 in ("007", "5"):
+        for _e47 in ENGINES:
+            if _e47 == "py":
+                _c47 = [PY, str(ROOT / "scripts" / "check-done.py"), "-c", _v47, "--project", str(ROOT / "no_such_proj")]
+            else:
+                _c47 = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(ROOT / "scripts" / "check-done.ps1"), "-Chapter", _v47, "-Project", str(ROOT / "no_such_proj")]
+            _pr47 = subprocess.run(_c47, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+            _rr47[f"{_e47}:{_v47}"] = ("参数错误" in (_decode(_pr47.stdout) + _decode(_pr47.stderr)), "项目目录不存在" in (_decode(_pr47.stdout) + _decode(_pr47.stderr)))
+    results.append(case("[三十五轮] 合法整数 007/5 → 守卫不误伤（双引擎均走业务判定，非参数错误）", True,
+                        all((not v[0]) and v[1] for v in _rr47.values())))
+    # d46③ perl 上中位（偶数样本 [2,3,4,5] → 中位 4，与 py/ps1 同）
+    _med48 = _nhd / "med.txt"
+    _med48.write_text("甲乙。\n\n甲乙丙丁。\n\n甲乙丙丁戊。\n\n甲乙丙丁戊己。\n", encoding="utf-8")
+    _pr48p = subprocess.run(["perl", str(ROOT / "scripts" / "fingerprint.pl"), str(_med48)], capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+    _pr48y = subprocess.run([PY, str(ROOT / "scripts" / "fingerprint.py"), str(_med48)], capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"}, cwd=str(ROOT))
+    def _med_of(txt):
+        # py JSON 键「段长中位」；perl 文本「段长: … 中位=N」——各按自家输出解析后比值
+        _m = re.search(r"段长中位[\"']?\s*[:=]\s*(\d+)", txt)
+        if _m:
+            return _m.group(1)
+        _m = re.search(r"段长[^|\n]*中位=(\d+)", txt)
+        return _m.group(1) if _m else "?"
+    _mp = _med_of(_decode(_pr48p.stdout))
+    _my = _med_of(_decode(_pr48y.stdout))
+    results.append(case("[三十五轮] perl 上中位口径（偶数样本段落中位与 py 一致，不再取下中位）", True,
+                        _pr48p.returncode == 0 and _mp == _my and _mp != "?"))
+    # d46④ foreshadow planted_ch 超日期上界 → 双引擎 rc1 中文（不再裸异常）
+    _pj49 = _nhd / "d46over"
+    (_pj49 / "记忆系统").mkdir(parents=True, exist_ok=True)
+    (_pj49 / "记忆系统" / "_state.json").write_text(
+        '{"schema_version":1,"state_revision":0,"last_committed_chapter":0,"book_title":"x","overview":{},"context":{},"characters":{},"foreshadow":{"a":{"name":"n","planted_ch":3000000,"planned_resolve_ch":null,"resolved_ch":null,"status":"open"}},"facts":[],"wordcounts":{},"summaries":{}}',
+        encoding="utf-8")
+    _rr49 = {}
+    for _e49 in ENGINES:
+        if _e49 == "py":
+            _c49 = [PY, str(ROOT / "scripts" / "foreshadow_timeline.py"), "--project", str(_pj49)]
+        else:
+            _c49 = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(ROOT / "scripts" / "foreshadow_timeline.ps1"), "-Project", str(_pj49)]
+        _pr49 = subprocess.run(_c49, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+        _rr49[_e49] = (_pr49.returncode, _nl(_decode(_pr49.stdout)).strip())
+    results.append(case("[三十五轮] foreshadow planted_ch 超日期上界 → 双引擎 rc1 同文案「超出日期换算上界」（不再裸 Overflow/AddDays 异常）", True,
+                        all(v[0] == 1 and "超出日期换算上界" in v[1] for v in _rr49.values())
+                        and len(set(_rr49.values())) == 1))
+    # d46⑤ NOTICE 入包 → 双引擎载荷 100 且清单含 NOTICE
+    _pk46 = {}
+    for _e46b, _cmd46b in (("py", [PY, str(ROOT / "scripts" / "package_skill.py"), "--check"]),
+                           ("ps1", [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(ROOT / "scripts" / "package_skill.ps1"), "-Check"])):
+        _pr46b = subprocess.run(_cmd46b, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"}, cwd=str(ROOT))
+        _pk46[_e46b] = (_pr46b.returncode, "载荷：100 个文件" in _decode(_pr46b.stdout), "NOTICE" in _decode(_pr46b.stdout))
+    results.append(case("[三十五轮] NOTICE 入包 → 双引擎载荷 100 文件且清单含 NOTICE（Apache-2.0 署名随包保留）", True,
+                        all(v[0] == 0 and v[1] and v[2] for v in _pk46.values())))
 
     ok_n = sum(results)
     total = len(results)
@@ -2612,6 +3708,9 @@ def _run(results: list[bool]) -> int:
 
 def main() -> int:
     """外壳：任一段外异常登记为 FAIL 并打印汇总（不静默崩溃、必出结果行）。"""
+    if "ps1" not in ENGINES:
+        print("❌ 本套件要求 py+ps1 双引擎：未检测到 PowerShell（CI windows-latest 自带；本机请安装 pwsh 或确保 powershell 在 PATH）")
+        return 1
     results: list[bool] = []
     try:
         return _run(results)

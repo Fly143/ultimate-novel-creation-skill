@@ -4,7 +4,7 @@
 
 校验 SKILL.md frontmatter（name/description/version 必填）→ 收集运行时载荷
 （SKILL.md / system_prompt.md / LICENSE / modules / templates / references / scripts）
-→ --check 只打印清单；默认再产出确定性 zip（固定时间戳+排序，两次运行字节一致）。
+→ --check 只打印清单；默认再产出确定性 zip（固定时间戳+排序；同一 Python 解释器两次运行字节一致，跨解释器 zlib 差异可致字节不同，载荷计数不受影响）。
 排除：.git / .github / .agents / dist / 记忆系统模板 等过程资产。
 双实现口径：--check 清单输出与 package_skill.ps1 逐字节一致；zip 仅 py 产出（见实施记录偏离项）。
 用法：
@@ -17,8 +17,15 @@ import sys
 import zipfile
 from pathlib import Path
 
+class _ArgParser(argparse.ArgumentParser):
+    # 参数错误收敛 rc1 + 中文（对齐 check-done/check-doc-budget/detect；ps1 绑定失败亦 rc1）
+    def error(self, message):
+        print(f"❌ 参数错误：{message}")
+        raise SystemExit(1)
+
+
 INCLUDE_DIRS = ["modules", "templates", "references", "scripts"]
-INCLUDE_FILES = ["SKILL.md", "system_prompt.md", "LICENSE"]
+INCLUDE_FILES = ["SKILL.md", "system_prompt.md", "LICENSE", "NOTICE"]  # NOTICE=OpenFic Apache-2.0 署名（HANDOFF:133 要求随包保留）
 FM_REQUIRED = ["name", "description", "version"]
 
 
@@ -55,7 +62,7 @@ def collect(root: Path) -> list[str]:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser()
+    ap = _ArgParser()
     ap.add_argument("--root", default=str(Path(__file__).resolve().parents[1]))
     ap.add_argument("--out", default="")
     ap.add_argument("--check", action="store_true")

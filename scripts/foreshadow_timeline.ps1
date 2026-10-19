@@ -8,14 +8,23 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$Project,
-    [long]$CurrentCh = 0
+    [string]$CurrentCh = '0'
 )
+# 参数错误收敛：纯 ASCII 十进制（[long] 会把 "1e3"/"+5"/"0x10"/" 5"/"" 静默转换，与 py _i64 反向裁决）
+if ($CurrentCh -notmatch '^-?[0-9]+$') { [Console]::Out.WriteLine('❌ 参数错误：章节号须为纯 ASCII 十进制整数（对齐 py _i64）'); exit 1 }
+$CurrentChRaw = $CurrentCh  # param([string]) 类型约束会把赋值回炉成 String，先存原值再解约束重赋
+Remove-Variable -Name CurrentCh -Force -ErrorAction SilentlyContinue
+$CurrentCh = [long]$CurrentChRaw
+
 $ErrorActionPreference = 'Stop'
 try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catch {}
 $inv = [System.Globalization.CultureInfo]::InvariantCulture
 $MARK = '<!-- generated:foreshadow-timeline v1 | 派生件禁手改，重跑本脚本再生成 -->'
 
 function Get-Day([long]$ch) {
+    if (([math]::Max($ch, 1) - 1) -gt 2913088) {  # date 9999-12-31 上界；对齐 py day_of（不再裸 ArgumentOutOfRangeException）
+        [Console]::Out.WriteLine(('❌ 章号超出日期换算上界：{0}（≤2913088 才能映射到 9999 年内）' -f $ch)); exit 1
+    }
     $n = [Math]::Max($ch, 1)
     return ([datetime]::new(2000, 1, 1)).AddDays($n - 1).ToString('yyyy-MM-dd', $inv)
 }
@@ -35,7 +44,23 @@ $TitleBad = [regex]'[:,：，]'
 $statePath = Join-Path $Project '记忆系统/_state.json'
 $items = @()
 $src = 'state'
-$hasState = (Test-Path -LiteralPath $statePath)
+$hasState = $false
+if (Test-Path -LiteralPath $statePath) {
+    try {
+        $probeSt = [System.IO.File]::ReadAllText($statePath, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+    } catch {
+        Write-Output '❌ 记忆系统/_state.json JSON 损坏（先 state_commit check 修复状态单）'; exit 1  # 对齐 py load_state：损坏 rc1（不再降级「无数据源」）
+    }
+    if ($null -eq $probeSt -or $probeSt.GetType().FullName -ne 'System.Management.Automation.PSCustomObject') {  # null 兜底：pwsh7 管道 ConvertFrom-Json 会把空数组 [] 枚举成 $null（PS5.1 不枚举）；数组/字符串/数字按类型全名硬判（对齐 py isinstance(dict)）
+        Write-Output '❌ 记忆系统/_state.json 须为对象（先 state_commit check 修复状态单）'; exit 1  # 对齐 py 顶层判型
+    }
+    # 与 py 同口径：state 存在且 foreshadow 键非 null 才走 state，否则回退清单
+    $fsProbe = $probeSt.PSObject.Properties['foreshadow']
+    if ($null -ne $fsProbe -and $null -ne $fsProbe.Value -and $fsProbe.Value -isnot [pscustomobject]) {
+        Write-Output '❌ foreshadow 须为对象（先 state_commit check 修复状态单）'; exit 1  # 对齐 py from_state 顶层数值判型
+    }
+    $hasState = ($null -ne $fsProbe -and $null -ne $fsProbe.Value)
+}
 
 if (-not $hasState) {
     $clPath = Join-Path $Project '记忆系统/圣经/伏笔清单.md'
@@ -107,9 +132,11 @@ if (-not $hasState) {
     }
     foreach ($k in $fs.Keys) {
         $v = $fs[$k]
-        $pl = 0; if ($null -ne $v.PSObject.Properties['planted_ch'] -and $v.planted_ch) { $pl = [long]$v.planted_ch }
-        $planned = 0; if ($null -ne $v.PSObject.Properties['planned_resolve_ch'] -and $v.planned_resolve_ch) { $planned = [long]$v.planned_resolve_ch }
-        $rs = 0; if ($null -ne $v.PSObject.Properties['resolved_ch'] -and $v.resolved_ch) { $rs = [long]$v.resolved_ch }
+        if ($v -isnot [pscustomobject]) { Write-Output ("❌ foreshadow.{0} 须为对象（先 state_commit check 修复状态单）" -f $k); exit 1 }
+        # Truncate 对齐 py int()：浮点章号向零截断（state 闸已拦浮点，此处兜底独立运行场景）
+        $pl = 0; if ($null -ne $v.PSObject.Properties['planted_ch'] -and $v.planted_ch) { $pl = [math]::Truncate([double]$v.planted_ch) }
+        $planned = 0; if ($null -ne $v.PSObject.Properties['planned_resolve_ch'] -and $v.planned_resolve_ch) { $planned = [math]::Truncate([double]$v.planned_resolve_ch) }
+        $rs = 0; if ($null -ne $v.PSObject.Properties['resolved_ch'] -and $v.resolved_ch) { $rs = [math]::Truncate([double]$v.resolved_ch) }
         $stt = 'open'; if ($rs -gt 0) { $stt = 'resolved' }
         $items += [pscustomobject]@{ id = [string]$k; name = [string]$v.desc; planted = $pl; planned = $planned; resolved = $rs; status = $stt }
     }
@@ -127,7 +154,7 @@ if ($CurrentCh -le 0) {
     }
     if ($CurrentCh -eq 0 -and $hasState) {
         $st2 = [System.IO.File]::ReadAllText($statePath, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
-        if ($null -ne $st2.PSObject.Properties['last_committed_chapter'] -and $st2.last_committed_chapter) { $CurrentCh = [long]$st2.last_committed_chapter }
+        if ($null -ne $st2.PSObject.Properties['last_committed_chapter'] -and $st2.last_committed_chapter) { $CurrentCh = [math]::Truncate([double]$st2.last_committed_chapter) }  # Truncate 对齐 py int()
     }
 }
 

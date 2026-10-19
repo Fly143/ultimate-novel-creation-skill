@@ -17,6 +17,7 @@ param(
     [switch]$Apply
 )
 
+try { [System.Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false) } catch { }  # 中文输出不乱码（对齐其余 ps1）
 $ErrorActionPreference = 'Stop'
 
 # ---- 目录映射（记忆系统/ 下）----
@@ -72,7 +73,7 @@ foreach($proj in $projects){
     Write-Host "===== 项目：$($proj.Name) =====" -ForegroundColor Magenta
 
     # 1) 迁移子目录
-    foreach($k in $dirMap.Keys){
+    foreach($k in ($dirMap.Keys | Sort-Object)){  # 键序确定（pwsh7/PS5.1 哈希迭代序不同，预览日志对拍一致）
         $old = Join-Path $memRoot $k
         $new = Join-Path $memRoot $dirMap[$k]
         if(Test-Path -LiteralPath $old){
@@ -89,7 +90,7 @@ foreach($proj in $projects){
     foreach($dirName in @($dirMap.Values | ForEach-Object { $_ }) + @('bible','summaries','phases','volumes','constraints')){
         $dir = Join-Path $memRoot $dirName
         if(-not (Test-Path -LiteralPath $dir)){ continue }
-        foreach($k in $fileMap.Keys){
+        foreach($k in ($fileMap.Keys | Sort-Object)){  # 键序确定（同上）
             $old = Join-Path $dir $k
             if(Test-Path -LiteralPath $old){
                 $dest = Join-Path $dir $fileMap[$k]

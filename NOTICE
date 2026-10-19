@@ -1,0 +1,13 @@
+全能小说作家（ultimate-novel-creation-skill）
+Copyright (c) 2026 Fly143
+
+本产品授权为 MIT（见 LICENSE）。
+
+以下组件/内容移植自第三方项目，依其许可证保留署名：
+
+1. OpenFic（syrizelink/OpenFic）— Apache License 2.0
+   移植内容：deslop（去AI味）体系精编移植，见
+   - references/朱雀AIGC检测对策.md 下篇「去AI味修订指南」
+   - templates/朱雀去AI化检查清单.md（瘦身重排后的判定节）
+   原始出处：backend/app/skills/deslop-lexicon.yaml 与 deslop-writing.yaml
+   （用户 2026-10-18 显式授权移植，见 .github/plans/2026-10-15-实施记录.md §三.15a）

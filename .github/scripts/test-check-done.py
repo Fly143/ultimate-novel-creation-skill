@@ -96,12 +96,10 @@ def _pnorm_one(_m):
     tok = tok[0].upper() + tok[1:]
     try:
         import os as _os
-        rp = _os.path.realpath(tok)
-        if _os.path.exists(rp):
-            return rp
+        # realpath 对不存在路径也会解析存在的 8.3 短名前缀（尾部缺失段保留）→ 无需 exists 前置
+        return _os.path.realpath(tok)
     except (OSError, ValueError):
-        pass
-    return tok
+        return tok
 
 
 def _pnorm(s: str) -> str:
@@ -1670,7 +1668,8 @@ def _run(results: list[bool]) -> int:
             _rc1_m, _o1_m = _mig_run(_e_mig, _mp_mig, False)
             _mig_detail = (f"dry_rc={_rc1_m} 保留原位={'保留原位' in _o1_m} "
                            f"角色库={(_b_mig / '角色数据库.md').is_file()} 圣经={(_b_mig / '故事圣经.md').is_file()} "
-                           f"归档={(_mp_mig / '记忆系统' / '_旧存档' / '圣经' / '作者真相时间线.md').is_file()}")
+                           f"归档={(_mp_mig / '记忆系统' / '_旧存档' / '圣经' / '作者真相时间线.md').is_file()} "
+                           f"| out头3行={_o1_m.splitlines()[:3]} | err尾={_o1_m.splitlines()[-2:]}")
         results.append(case(f"[🔴回归] migrate 归档白名单 → 角色数据库保留原位、派生件归档后重渲染 [{_e_mig}]", True, _mig_cond, _mig_detail))
 
     # x) ch0 大纲种子提交：draft/commit --chapter 0 → 渲染真相时间线、不产生 .done 标记

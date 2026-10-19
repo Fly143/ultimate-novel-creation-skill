@@ -1643,10 +1643,13 @@ def _run(results: list[bool]) -> int:
         pr = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
         return pr.returncode, _decode(pr.stdout) + _decode(pr.stderr)
 
+    _mig_cap = {}  # 首次运行的真实值（CI detail 不得二次跑复现——apply 后 dry 会报「已存在」
+
     def _mig_ok(engine):
         proj = _mig_setup(f"p_mig_{engine}")
         rc1, out1 = _mig_run(engine, proj, False)
         rc2, _out2 = _mig_run(engine, proj, True)
+        _mig_cap[engine] = (rc1, out1, rc2, _out2)
         bible = proj / "记忆系统" / "圣经"
         return (rc1 == 0 and rc2 == 0
                 and (bible / "角色数据库.md").is_file()
@@ -1662,14 +1665,14 @@ def _run(results: list[bool]) -> int:
         except Exception as _exc:  # noqa: BLE001
             _mig_cond = False
             _mig_detail = f"{type(_exc).__name__}: {_exc}"
-        if not _mig_cond and not _mig_detail:
+        if not _mig_cond and not _mig_detail and _e_mig in _mig_cap:
+            _rc1_m, _o1_m, _rc2_m, _o2_m = _mig_cap[_e_mig]  # 首次运行原值
             _mp_mig = _nhd / f"p_mig_{_e_mig}"
             _b_mig = _mp_mig / "记忆系统" / "圣经"
-            _rc1_m, _o1_m = _mig_run(_e_mig, _mp_mig, False)
-            _mig_detail = (f"dry_rc={_rc1_m} 保留原位={'保留原位' in _o1_m} "
+            _mig_detail = (f"dry_rc={_rc1_m} dry保留原位={'保留原位' in _o1_m} apply_rc={_rc2_m} "
                            f"角色库={(_b_mig / '角色数据库.md').is_file()} 圣经={(_b_mig / '故事圣经.md').is_file()} "
                            f"归档={(_mp_mig / '记忆系统' / '_旧存档' / '圣经' / '作者真相时间线.md').is_file()} "
-                           f"| out头3行={_o1_m.splitlines()[:3]} | err尾={_o1_m.splitlines()[-2:]}")
+                           f"| dry头3行={_o1_m.splitlines()[:3]} | apply尾2行={_o2_m.splitlines()[-2:]}")
         results.append(case(f"[🔴回归] migrate 归档白名单 → 角色数据库保留原位、派生件归档后重渲染 [{_e_mig}]", True, _mig_cond, _mig_detail))
 
     # x) ch0 大纲种子提交：draft/commit --chapter 0 → 渲染真相时间线、不产生 .done 标记

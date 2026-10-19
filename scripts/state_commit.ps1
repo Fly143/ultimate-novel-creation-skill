@@ -55,7 +55,16 @@ function Write-Utf8File {
 
 function Get-RelPath {
     param([string]$Base, [string]$Full)
-    return $Full.Substring($Base.Length).TrimStart('\', '/').Replace('\', '/')
+    # 前缀归一后再 Substring：CI 上 $Base（参数拼接，可能 8.3 短名形态）与 $Full（Get-ChildItem FullName，长名）
+    # 形态不一致时 Substring 错位 → 归档路径错位（实测 _旧存档\忆系统\… 少首字）；同时 -ieq 容忍盘符/目录大小写差
+    $b = $Base.TrimEnd([char]92, [char]47)
+    if (Test-Path -LiteralPath $b) { $b = (Get-Item -LiteralPath $b).FullName.TrimEnd([char]92, [char]47) }
+    if (Test-Path -LiteralPath $Full) { $Full = (Get-Item -LiteralPath $Full).FullName }
+    if ($Full.Length -gt $b.Length -and $Full.Substring(0, $b.Length).Equals($b, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $Full.Substring($b.Length).TrimStart([char]92, [char]47).Replace('\', '/')
+    }
+    # 兜底：前缀仍未命中（极端形态差）→ 按叶子名返回，绝不错位切片
+    return (Split-Path -Leaf $Full).Replace('\', '/')
 }
 
 function Sort-Ordinal {

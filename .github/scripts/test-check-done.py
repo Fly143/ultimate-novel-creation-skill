@@ -1669,10 +1669,13 @@ def _run(results: list[bool]) -> int:
             _rc1_m, _o1_m, _rc2_m, _o2_m = _mig_cap[_e_mig]  # 首次运行原值
             _mp_mig = _nhd / f"p_mig_{_e_mig}"
             _b_mig = _mp_mig / "记忆系统" / "圣经"
+            _arc_tree = [str(_p.relative_to(_mp_mig)) for _p in (_mp_mig / "记忆系统").rglob("*.md")] if (_mp_mig / "记忆系统").is_dir() else []
             _mig_detail = (f"dry_rc={_rc1_m} dry保留原位={'保留原位' in _o1_m} apply_rc={_rc2_m} "
                            f"角色库={(_b_mig / '角色数据库.md').is_file()} 圣经={(_b_mig / '故事圣经.md').is_file()} "
                            f"归档={(_mp_mig / '记忆系统' / '_旧存档' / '圣经' / '作者真相时间线.md').is_file()} "
-                           f"| dry头3行={_o1_m.splitlines()[:3]} | apply尾2行={_o2_m.splitlines()[-2:]}")
+                           f"| dry待归档行={[l for l in _o1_m.splitlines() if '待归档' in l]} "
+                           f"| apply归档行={[l for l in _o2_m.splitlines() if '归档旧文件' in l]} "
+                           f"| md树={_arc_tree}")
         results.append(case(f"[🔴回归] migrate 归档白名单 → 角色数据库保留原位、派生件归档后重渲染 [{_e_mig}]", True, _mig_cond, _mig_detail))
 
     # x) ch0 大纲种子提交：draft/commit --chapter 0 → 渲染真相时间线、不产生 .done 标记

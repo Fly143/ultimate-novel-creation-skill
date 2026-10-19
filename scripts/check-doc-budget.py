@@ -25,6 +25,13 @@ from pathlib import Path
 BUDGET_PATH = Path(__file__).resolve().parent / "doc-budget.json"
 # 度量口径（与 ps1 逐字一致）：UTF-8 字节解码剥 BOM → 换行归一化为 \n → 移除空白集合
 WS_RE = re.compile(r"[ \t\n\f\v\u00a0\u2028\u2029\u3000]+")
+_WS_REF = "\t\n\x0b\x0c\r\x1c\x1d\x1e\x1f \x85\xa0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000"
+_I64_MIN, _I64_MAX = -(2 ** 63), 2 ** 63 - 1
+
+
+def _in_i64(v) -> bool:
+    # 与 ps1 的 [int]/[long] 判型对齐：超 Int64 的整数 ps1 判非法 → py 同判（fail-closed）
+    return isinstance(v, int) and not isinstance(v, bool) and _I64_MIN <= v <= _I64_MAX
 HEAD_RE = re.compile(r"^(#{1,6})\s+(.*)$")
 
 
@@ -68,7 +75,7 @@ def validate_rules(rules: dict) -> list[str]:
             if not isinstance(item["path"], str):
                 errs.append(f"files[{i}].path 须为字符串")
             # 严格整数：float(10.9) 截断与 .NET 四舍五入会让双引擎按不同阈值裁决 → 必须类型判定
-            if not (isinstance(item["budget"], int) and not isinstance(item["budget"], bool)):
+            if not _in_i64(item["budget"]):
                 errs.append(f"files[{i}].budget 须为整数")
     paths = rules.get("paths")
     if isinstance(paths, list):
@@ -104,7 +111,7 @@ def validate_rules(rules: dict) -> list[str]:
     ):
         errs.append("exempt 须为字符串或字符串数组")
     lim = ceiling.get("limit")
-    if not (isinstance(lim, int) and not isinstance(lim, bool)) or lim < 0:
+    if not _in_i64(lim) or lim < 0:
         errs.append("path_ceiling.limit 须为非负整数")
     return errs
 
@@ -255,7 +262,7 @@ def main() -> int:
             continue
         _n_m, _st_m = measure(root, _ref_m)
         if _n_m is not None and _n_m > _max_single[1]:
-            _max_single = (_ref_m, _n_m)
+            _max_single = (_ref_m.split('#')[0].strip(_WS_REF), _n_m)
     _lparts = " / ".join(f"{k} {lc[k]}" for k in valid_layers)
     print(f"分层校验：{_lparts}（压缩时只裁 compressible，protected 永不裁）")
 
@@ -304,23 +311,63 @@ def main() -> int:
                 worst, worst_label = total, label
         print(f"  {flag} {label} {total:,}/{limit:,}（{' '.join(detail)}）")
 
-    # 基线防漂移闸：baseline 五字段须与实测一致（改文档后必须回填，禁止静默过期）
-    _bl = rules.get("baseline") or {}
-    if isinstance(_bl, dict) and _bl:
-        if isinstance(_bl.get("worst_path_chars"), int) and not isinstance(_bl.get("worst_path_chars"), bool) and _bl["worst_path_chars"] != worst:
-            errors.append(f"基线过期：baseline.worst_path_chars={_bl['worst_path_chars']:,} ≠ 实测 {worst:,}（改文档后回填 doc-budget.json baseline）")
+    def _bl_disp(v):
+        # 非法基线值展示归一（与 ps1 0.##########/ConvertTo-Json 口径对齐）
+        if v is None:
+            return ""
+        if isinstance(v, bool):
+            return str(v)
+        if isinstance(v, float):
+            if v == 0:
+                return "0"  # ±0.0 统一显示 0（ps5.1 G15 丢负号，与 py/pwsh7 对齐）
+            if v != v:
+                return "NAN"
+            if v == float("inf"):
+                return "INFINITY"
+            if v == float("-inf"):
+                return "-INFINITY"
+            return f"{v:.15g}".upper()
+        if isinstance(v, int) and not _in_i64(v):
+            # 超 Int64 整数（ps1 pwsh7=BigInteger / 5.1=Double）→ 统一 G15 展示
+            return f"{float(v):.15g}".upper()
+        if isinstance(v, (list, dict)):
+            return json.dumps(v, ensure_ascii=False, separators=(",", ":"))
+        return str(v)
+
+    # 基线防漂移闸：baseline 五字段须与实测一致（改文档后必须回填，禁止静默过期）；缺键/换型一律 fail-closed
+    _bl = rules.get("baseline")
+    if not isinstance(_bl, dict):
+        errors.append("基线非法：baseline 块缺失或非对象（须含 worst/writer/resident/precheck/max_single 五字段）")
+    else:
+        for _k_miss in ("worst_path_chars", "writer_delegated_chars", "session_resident_chars", "precheck_path_chars", "max_single_file"):
+            if _k_miss not in _bl:
+                errors.append(f"基线缺键：baseline.{_k_miss}（五字段必须齐全）")
+        if "worst_path_chars" in _bl:
+            _w_b = _bl["worst_path_chars"]
+            if not _in_i64(_w_b):
+                _wbd = _bl_disp(_w_b)
+                errors.append(f"基线非法：baseline.worst_path_chars={_wbd}（应为整数，非整型值会绕过过期闸——fail-closed）")
+            elif _w_b != worst:
+                errors.append(f"基线过期：baseline.worst_path_chars={_w_b:,} ≠ 实测 {worst:,}（改文档后回填 doc-budget.json baseline）")
         for _lbl_b, _key_b in (("写一章·写手委派", "writer_delegated_chars"), ("主会话常驻（入口+协议+索引）", "session_resident_chars"), ("写前预检", "precheck_path_chars")):
             _v_b = _bl.get(_key_b)
-            if isinstance(_v_b, int) and not isinstance(_v_b, bool) and _lbl_b in _path_totals and _v_b != _path_totals[_lbl_b]:
+            if _key_b in _bl and not _in_i64(_v_b):
+                _vbd = _bl_disp(_v_b)
+                errors.append(f"基线非法：baseline.{_key_b}={_vbd}（应为整数，非整型值会绕过过期闸——fail-closed）")
+            elif _v_b is not None and _lbl_b in _path_totals and _v_b != _path_totals[_lbl_b]:
                 errors.append(f"基线过期：baseline.{_key_b}={_v_b:,} ≠ 实测 {_path_totals[_lbl_b]:,}（改文档后回填 doc-budget.json baseline）")
         _msf_b = _bl.get("max_single_file")
-        if isinstance(_msf_b, str) and "=" in _msf_b:
-            _sp_b, _sn_b = _msf_b.rsplit("=", 1)
-            try:
-                if int(_sn_b) != _max_single[1]:
-                    errors.append(f"基线过期：baseline.max_single_file={_msf_b} ≠ 实测 {_max_single[0]}={_max_single[1]:,}（改文档后回填 doc-budget.json baseline）")
-            except ValueError:
-                errors.append(f"基线非法：baseline.max_single_file={_msf_b}（应为 path=整数）")
+        if "max_single_file" in _bl:
+            if not isinstance(_msf_b, str) or "=" not in _msf_b:
+                errors.append(f"基线非法：baseline.max_single_file={_bl_disp(_msf_b)}（应为 path=整数）")
+            else:
+                _sp_b, _sn_b = _msf_b.rsplit("=", 1)
+                if not re.fullmatch(r"-?[0-9]+", _sn_b):
+                    errors.append(f"基线非法：baseline.max_single_file={_msf_b}（应为 path=整数）")
+                elif not _in_i64(int(_sn_b)):
+                    errors.append(f"基线非法：baseline.max_single_file={_msf_b}（应为 path=整数）")
+                elif _sp_b != _max_single[0] or int(_sn_b) != _max_single[1]:
+                    errors.append(f"基线过期：baseline.max_single_file={_msf_b} ≠ 实测 {_max_single[0]}={_max_single[1]:,}（路径段须为实测最大单文件名；改文档后回填 doc-budget.json baseline）")
     print()
     if args.print_baseline:
         print(f"基线：最坏路径 {worst:,}（{worst_label}）/ 上限 {limit:,}")

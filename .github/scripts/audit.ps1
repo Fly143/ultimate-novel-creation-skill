@@ -5,10 +5,13 @@
 # 用法：pwsh .github/scripts/audit.ps1 -Root <仓库路径> [-StrictOrphan] [-LintTerm] [-LintLineRef] [-LintBudget] [-LintOrder:$true|$false]（[bool] 参数，禁裸用；仅 pwsh 可传，PS5.1 -File 下绑定失败）
 #   -StrictOrphan : 孤儿判定收紧为「必须存在指向该资产路径的引用」（默认关闭，便于渐进收紧）
 #   -LintTerm     : 额外检查裸英文术语 volume/phase/stage/summary（仅警告，不阻断）
-#   -LintLineRef  : 额外检查「第N行」式行号引用（仅警告，不阻断）
+#   -LintLineRef  : 额外检查「第N行」式行号引用（仅警告，不阻断；仅定位文档结构的语境——区间行号/结构词后 10 字内/*.md 后 15 字内，裸「第N行」不告警）
 #   -LintOrder    : 额外检查写后顺序权威（先朱雀后修复）与 .done_zhuque 语义锚点（默认开启可单独关：-LintOrder:$false）
 # 发现问题输出清单并 exit 1（CI 失败）；全部通过 exit 0。
+# 已知限制：参数绑定错误（未知旗标/bool 裸传）在脚本体执行前抛出，本文件的 OutputEncoding 修复来不及生效——
+#   PS5.1 -File 下该类错误文案经 git-bash 捕获可能乱码（rc1 语义不变，仅文案）；如需准确文案看绑定错误的参数名。
 # ============================================================
+[CmdletBinding()]
 param(
     [string]$Root = (Get-Location).Path,
     [switch]$StrictOrphan,
@@ -128,7 +131,6 @@ if($StrictOrphan){
     if($docRoots -contains $f){ continue }
     if($f -like '.github/*'){ continue }        # 维护者工具，无需被 skill 内容引用
     if($f -like '.agents/*'){ continue }        # ADR 为过程记录，不按资产判孤儿
-    if($f -like 'modules/*'){ continue }        # 模块为主动加载入口，由 00 协议/索引引用
     if(-not $refs.ContainsKey($f)){ $orphans += $f }
   }
   if($orphans.Count){
@@ -203,7 +205,7 @@ if($LintTerm){
       if($inFence){ continue }
       $ln = $ln -replace '`[^`]*(volume|phase|stage|summaries)[^`]*`', ''  # 反引号包裹的 JSON 字段/代码名不计
       if($ln -match '→|->'){ continue }   # 路径映射表（如 summaries→摘要）本就需要英文原名，豁免
-      if($ln -match $termRe){ $termHits += "$rel :$($i+1) 裸英文术语 '$($Matches[1])'" }
+      foreach($tm in [regex]::Matches($ln, $termRe)){ $termHits += "$rel :$($i+1) 裸英文术语 '$($tm.Groups[1].Value)'" }
     }
   }
   if($termHits.Count){
@@ -265,8 +267,8 @@ if($LintOrder){
     }
   }
   # 禁止把错误顺序写成必做（本行或上一行出现豁免词则放行）
-  $wrongOrderRe = '(先修复再朱雀|修复\s*→\s*朱雀|修复\s*→\s*\.done_zhuque|修复后再(跑)?朱雀|修复，再(跑)?朱雀)'
-  $allowRe = '(禁止|不得|禁写|勿写|错误顺序|互斥|不要写成|不要写|禁止写成|不得写成|禁止把|不得把|严禁|非|勿)'
+  $wrongOrderRe = '(先修复再朱雀|先修复后朱雀|先修复，后朱雀|修复后(再)?朱雀|修复完成后(再)?(执行|跑)?朱雀|先跑修复、后跑朱雀|修复\s*→\s*朱雀|修复\s*→\s*\.done_zhuque|修复后再(跑)?朱雀|修复，再(跑)?朱雀)'
+  $allowRe = '(禁止|不得|禁写|勿写|错误顺序|互斥|不要写成|不要写|禁止写成|不得写成|禁止把|不得把|严禁|非必做|非强制|勿)'
   $orderHits = @()
   Get-ChildItem -Recurse -File $Root -Filter *.md | ForEach-Object {
     $rel = $_.FullName.Substring($Root.Length+1) -replace '\\','/'

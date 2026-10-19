@@ -14,8 +14,14 @@
 param(
     [Parameter(Mandatory = $true)][string]$InputFile,
     [string]$ExtraLexicon = "",
-    [long]$FailOver = 0
+    [string]$FailOver = '0'
 )
+# 参数错误收敛：纯 ASCII 十进制（[long] 会把 "1e3"/"+5"/"0x10"/" 5"/"" 静默转换，与 py _i64 反向裁决）
+if ($FailOver -notmatch '^-?[0-9]+$') { [Console]::Out.WriteLine('❌ 参数错误：--fail-over 须为纯 ASCII 十进制整数（对齐 py _i64）'); exit 1 }
+$FailOverRaw = $FailOver  # param([string]) 类型约束会把赋值回炉成 String，先存原值再解约束重赋
+Remove-Variable -Name FailOver -Force -ErrorAction SilentlyContinue
+$FailOver = [long]$FailOverRaw
+
 $ErrorActionPreference = 'Stop'
 try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catch {}
 
@@ -45,7 +51,7 @@ function Trim-Sent([string]$s) {
     return $s
 }
 
-if (-not (Test-Path -LiteralPath $InputFile)) { Write-Output ('❌ 文件不存在：{0}' -f $InputFile); exit 1 }
+if (-not (Test-Path -LiteralPath $InputFile -PathType Leaf)) { Write-Output ('❌ 文件不存在：{0}' -f $InputFile); exit 1 }  # Leaf 判定（目录亦判不存在，对齐 py isfile）
 $raw = [System.IO.File]::ReadAllText($InputFile, [System.Text.Encoding]::UTF8)
 $t = $raw.Replace("`r`n", "`n").Replace("`r", "`n")  # py open() 通用换行：lone \r 亦归 \n
 $units = $t.Length

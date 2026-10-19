@@ -37,7 +37,7 @@ def load_state(project: Path) -> dict:
     p = project / STATE_REL
     if not p.is_file():
         raise FileNotFoundError(f"缺少状态单：{p}")
-    with p.open(encoding="utf-8") as f:
+    with p.open(encoding="utf-8-sig") as f:
         return json.load(f)
 
 
@@ -219,7 +219,7 @@ def compare_views(project: Path, views: dict[str, str]) -> list[str]:
         if not p.is_file():
             bad.append(f"{rel}（缺失）")
             continue
-        cur = p.read_text(encoding="utf-8", errors="replace").replace("\r\n", "\n")
+        cur = p.read_text(encoding="utf-8-sig", errors="replace").replace("\r\n", "\n")
         if cur != text:
             bad.append(rel)
     return bad

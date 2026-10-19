@@ -21,7 +21,7 @@
 # ============================================================
 param(
     [Parameter(Mandatory = $true)][string]$Project,
-    [Parameter(Mandatory = $true)][long]$Chapter,
+    [Parameter(Mandatory = $true)][string]$Chapter,
     [switch]$IncludeChapterDone,
     [switch]$StrictReport,
     [switch]$SoftReport,
@@ -36,6 +36,12 @@ try { [System.Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($fa
 # py 口径空白全集（str.strip 含 U+001C-U+001F；.NET 默认 Trim 不含 → 必须显式给集，防与 py 反向裁决）
 $wsChars = [char[]]@(0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x1c, 0x1d, 0x1e, 0x1f, 0x20, 0x85, 0xa0, 0x1680, 0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007, 0x2008, 0x2009, 0x200a, 0x2028, 0x2029, 0x202f, 0x205f, 0x3000)
 # fail-closed：读盘/解析错误必须中止并 rc1，禁止吞错继续（目录当报告等场景不得 exit0 放行）
+# 参数错误收敛：纯 ASCII 十进制（[long] 会把 "1e3"/"+5"/"0x10"/" 5"/"" 静默转换，与 py _i64 反向裁决）
+if ($Chapter -notmatch '^-?[0-9]+$') { [Console]::Out.WriteLine('❌ 参数错误：章节号须为纯 ASCII 十进制整数（对齐 py _i64）'); exit 1 }
+$ChapterRaw = $Chapter  # param([string]) 类型约束会把赋值回炉成 String，先存原值再解约束重赋
+Remove-Variable -Name Chapter -Force -ErrorAction SilentlyContinue
+$Chapter = [long]$ChapterRaw
+
 $ErrorActionPreference = 'Stop'
 
 function Test-MarkerState {
@@ -286,6 +292,13 @@ function Find-BodyFile {
     param([string]$ProjectRoot, [string]$Nnn, [long]$Ch)
     $bodyDir = Join-Path $ProjectRoot '正文'
     if (-not (Test-Path -LiteralPath $bodyDir)) { return $null }
+    function Guard-DirCandidate([object[]]$Dirs) {
+        # 目录冒充正文 → 双引擎同文案 rc1（对齐 py find_body _guard_dir / ps1:30 放行纪律）
+        if ($Dirs.Count -gt 0) {
+            [Console]::Out.WriteLine(('❌ 正文交叉校验：正文候选路径是目录（应为 .txt 文件）：{0}' -f $Dirs[0].FullName))
+            exit 1
+        }
+    }
     # 正文定位单源 = rules.body_globs（与 py find_body 同序、同双尝试、同排序）
     foreach ($g in $bodyGlobs) {
         $rel = $g.Replace('{nnn}', $Nnn).Replace('{ch}', [string]$Ch)
@@ -295,15 +308,21 @@ function Find-BodyFile {
         if ($dirRel -ne '') {
             $absDir = Join-Path $ProjectRoot ($dirRel -replace '/', [string][char]92)
             if (Test-Path -LiteralPath $absDir) {
+                $gd1 = @(Get-ChildItem -LiteralPath $absDir -Filter $filePat -Directory -ErrorAction SilentlyContinue | Sort-Object Name)
+                Guard-DirCandidate $gd1
                 $m = @(Get-ChildItem -LiteralPath $absDir -Filter $filePat -File -ErrorAction SilentlyContinue | Sort-Object Name)
                 if ($m.Count -gt 0) { return $m[0].FullName }
             }
         }
+        $gd2 = @(Get-ChildItem -LiteralPath $bodyDir -Filter $filePat -Directory -ErrorAction SilentlyContinue | Sort-Object Name)
+        Guard-DirCandidate $gd2
         $m2 = @(Get-ChildItem -LiteralPath $bodyDir -Filter $filePat -File -ErrorAction SilentlyContinue | Sort-Object Name)
         if ($m2.Count -gt 0) { return $m2[0].FullName }
     }
     # 兜底：前缀匹配（与 py find_body 一致）
     foreach ($prefix in @(('第{0}章' -f $Nnn), ('第{0}章' -f $Ch))) {
+        $gd3 = @(Get-ChildItem -LiteralPath $bodyDir -Filter ($prefix + '*.txt') -Directory -ErrorAction SilentlyContinue | Sort-Object Name)
+        Guard-DirCandidate $gd3
         $matches = @(Get-ChildItem -LiteralPath $bodyDir -Filter ($prefix + '*.txt') -File -ErrorAction SilentlyContinue | Sort-Object Name)
         if ($matches.Count -gt 0) { return $matches[0].FullName }
     }

@@ -12,9 +12,10 @@ param(
     [Parameter(Mandatory=$true)][string]$Path,
     [switch]$Json
 )
+try { [System.Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false) } catch { }  # 中文错误输出不乱码（对齐其余 8 个 ps1）
 $ErrorActionPreference = 'Stop'
 $enc = New-Object System.Text.UTF8Encoding($false)
-if(-not (Test-Path -LiteralPath $Path)){ Write-Error "文件不存在: $Path"; exit 1 }
+if(-not (Test-Path -LiteralPath $Path -PathType Leaf)){ Write-Error "文件不存在: $Path"; exit 1 }
 # py 口径 ws 全集（str.isspace/strip；.NET 默认 Trim 不含 U+001C-U+001F，缺它们即与 py 反向）
 $wsChars = [char[]]@(0x09,0x0a,0x0b,0x0c,0x0d,0x1c,0x1d,0x1e,0x1f,0x20,0x85,0xa0,0x1680,0x2000,0x2001,0x2002,0x2003,0x2004,0x2005,0x2006,0x2007,0x2008,0x2009,0x200a,0x2028,0x2029,0x202f,0x205f,0x3000)
 $t = [System.IO.File]::ReadAllText($Path, $enc)
@@ -24,6 +25,7 @@ if($total -eq 0){ Write-Error "文件为空"; exit 1 }
 # 段落（按换行切）
 $paras = @($t -split '\r\n|\r|\v|\f|[\x1c-\x1e]|\x85|\u2028|\u2029|\n' | Where-Object { $_.Trim($wsChars).Length -gt 0 })
 $pl = @($paras | ForEach-Object { $_.Trim($wsChars).Length })
+if ($pl.Count -eq 0) { Write-Output '❌ 无可统计段落（正文仅含空白），无法计算段落分布'; exit 1 }
 $plSorted = $pl | Sort-Object
 $pAvg = [int][math]::Round(($pl | Measure-Object -Average).Average,0)  # py round(x) 返回 int，JSON 才逐字节一致
 $pMed = $plSorted[[math]::Floor($plSorted.Count/2)]
@@ -34,6 +36,7 @@ $p100 = [math]::Round(100.0 * ($pl | Where-Object { $_ -le 100 }).Count / [math]
 $raw = $t -replace "`r?`n",""
 $sents = @([regex]::Matches($raw, '[^。！？!?…；;]+[。！？!?…；;]?') | ForEach-Object { $_.Value.Trim($wsChars) } | Where-Object { $_.Length -gt 0 -and $_.Length -lt 300 })
 $sl = @($sents | ForEach-Object { $_.Length })
+if ($sl.Count -eq 0) { Write-Output '❌ 无可统计句子（全部句子 ≥300 单元，无法计算句长分布）'; exit 1 }
 $slSorted = $sl | Sort-Object
 $sAvg = [math]::Round(($sl | Measure-Object -Average).Average,1)
 $sMed = $slSorted[[math]::Floor($slSorted.Count/2)]

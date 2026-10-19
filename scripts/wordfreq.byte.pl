@@ -16,11 +16,12 @@
 # ============================================================
 use strict; use warnings;
 
-my $path = shift or die "用法: perl wordfreq.byte.pl <正文.txt> [--skip-first] [--stop-at-dashes]\n";
+my $path = shift or do { print STDERR "用法: perl wordfreq.byte.pl <正文.txt> [--skip-first] [--stop-at-dashes]\n"; exit 1 };
 my ($skipFirst, $stopDashes) = (0, 0);
 for (@ARGV) {
-    $skipFirst = 1 if $_ eq "--skip-first";
-    $stopDashes = 1 if $_ eq "--stop-at-dashes";
+    if ($_ eq "--skip-first") { $skipFirst = 1 }
+    elsif ($_ eq "--stop-at-dashes") { $stopDashes = 1 }
+    else { print STDERR "❌ 参数错误：未知参数 $_\n"; exit 1 }  # 对齐 py/ps1 rc1（不再静默忽略）
 }
 
 # ---- 字节级 UTF-8 序列常量 ----
@@ -57,19 +58,20 @@ my @WORDSPEC = (
 );
 
 # ---- 读文件（原始字节）----
-open(my $fh, "<", $path) or die "无法打开 $path: $!\n";
+open(my $fh, "<", $path) or do { print STDERR "无法打开 $path: $!\n"; exit 1 };
 binmode($fh);
 local $/;
 my $t = <$fh>;
 close($fh);
-die "文件为空\n" unless length($t) > 0;
+$t =~ s/^\xEF\xBB\xBF//;  # 与 fingerprint.byte.pl 同口径：剥 BOM
+unless (length($t) > 0) { print STDERR "文件为空\n"; exit 1 }
 
 if ($stopDashes)  { $t =~ s/\r?\n----.*$//s; }
 if ($skipFirst)   { $t =~ s/^[^\r\n]*\r?\n//; }
 
 my $total = 0; $total++ while $t =~ /$CHAR/g;
 my $totalK = $total/1000.0;
-die "文件为空\n" if $total == 0;
+if ($total == 0) { print STDERR "文件为空\n"; exit 1 }  # 对齐同文件 :66（rc1，不再 rc255）
 
 # ---- 统计 ----
 my @results;
@@ -78,7 +80,7 @@ for my $spec (@WORDSPEC) {
     my $n = 0; $n++ while $t =~ /$word/g;
     my $perK = $n/$totalK;
     my $flag = "";
-    $flag = " ❌" if ($tier eq "高危" && $perK > 0.5) || $perK > 1.5;
+    $flag = " ❌" if ($cap < 90) && $perK > $cap;  # 按档位 cap 判定；正常类 cap=99 视作不检查（对齐 03_26:230「正常类不检查」与高级写作技巧铁律三分档）
     push @results, { tier=>$tier, word=>$word, perK=>$perK, n=>$n, flag=>$flag };
 }
 

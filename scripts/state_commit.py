@@ -30,6 +30,27 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import state_render  # noqa: E402  （同目录模块）
 
+def _i64(s):
+    # Int64 范围收口（对齐 ps1 [long] 绑定失败 rc1 / check-doc-budget _in_i64 先例）
+    _t = str(s)
+    if not re.fullmatch(r"-?[0-9]+", _t):  # 纯 ASCII 十进制（int(…,10) 会接受下划线/非 ASCII 数字如 3_0/١٢，ps1 [long] 绑定拒绝 → 反向裁决）
+        raise argparse.ArgumentTypeError(f"非十进制整数：{s}")
+    try:
+        v = int(_t, 10)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"非十进制整数：{s}")
+    if not (-2**63 <= v < 2**63):
+        raise argparse.ArgumentTypeError(f"超出 Int64 范围：{s}")
+    return v
+
+
+class _ArgParser(argparse.ArgumentParser):
+    # 参数错误收敛 rc1 + 中文（对齐 check-done/check-doc-budget/detect；ps1 绑定失败亦 rc1）
+    def error(self, message):
+        print(f"❌ 参数错误：{message}")
+        raise SystemExit(1)
+
+
 SCHEMA_VERSION = 1
 STATE_REL = Path("记忆系统/_state.json")
 DRAFT_REL = Path("记忆系统/_state.migrate-draft.json")
@@ -55,8 +76,13 @@ def _die(msg: str) -> int:
 
 
 def load_json(p: Path) -> dict:
-    with p.open(encoding="utf-8") as f:
-        return json.load(f)
+    # 损坏 JSON → 中文兜底 rc1（对齐 ps1 ConvertFrom-Json 的 try/catch 托管输出）
+    with p.open(encoding="utf-8-sig") as f:
+        try:
+            return json.load(f)
+        except json.JSONDecodeError as exc:
+            print(f"❌ 状态单 JSON 损坏：{exc}")
+            sys.exit(1)
 
 
 def state_path(project: Path) -> Path:
@@ -74,12 +100,13 @@ def validate_state(s: dict) -> list[str]:
     for k in REQUIRED_KEYS:
         if k not in s:
             errs.append(f"缺字段：{k}")
-    if s.get("state_revision") is not None and not (isinstance(s["state_revision"], int) and not isinstance(s["state_revision"], bool)):
-        errs.append("state_revision 必须是整数（乐观锁比较用）")
-    if s.get("imported_through_chapter") is not None and not (isinstance(s["imported_through_chapter"], int) and not isinstance(s["imported_through_chapter"], bool)):
-        errs.append("imported_through_chapter 必须是整数")
-    if s.get("last_committed_chapter") is not None and not (isinstance(s["last_committed_chapter"], int) and not isinstance(s["last_committed_chapter"], bool)):
-        errs.append("last_committed_chapter 必须是整数")
+    # 三标量：键存在即须为 Int64 内整数（显式 null/超界与 ps1 [int]/[long] 判型同判，fail-closed）
+    for _sk, _smsg in (("state_revision", "state_revision 必须是整数（乐观锁比较用）"),
+                       ("imported_through_chapter", "imported_through_chapter 必须是整数"),
+                       ("last_committed_chapter", "last_committed_chapter 必须是整数")):
+        if _sk in s and not (isinstance(s[_sk], int) and not isinstance(s[_sk], bool)
+                             and -(2 ** 63) <= s[_sk] < 2 ** 63):
+            errs.append(_smsg)
     _summ = s.get("summaries")
     if _summ is not None and not isinstance(_summ, dict):
         errs.append("summaries 须为对象")
@@ -106,7 +133,7 @@ def validate_state(s: dict) -> list[str]:
         errs.append("facts 须为数组")
     elif isinstance(fv, list):
         for _fi2, _fe2 in enumerate(fv):
-            if _fe2 is not None and not isinstance(_fe2, dict):
+            if not isinstance(_fe2, dict):
                 errs.append(f"facts[{_fi2}] 须为对象")
                 break
     if isinstance(ov, dict) and isinstance(ov.get("stages"), list):
@@ -129,9 +156,18 @@ def validate_state(s: dict) -> list[str]:
         errs.append("foreshadow 须为对象")
     elif isinstance(fsv, dict):
         for _fsn, _fsv in fsv.items():
-            if _fsv is not None and not isinstance(_fsv, dict):
+            if not _fsn:
+                errs.append("foreshadow 键名不能为空（空键 pwsh7 ConvertFrom-Json 拒读）")
+                break
+            if not isinstance(_fsv, dict):
                 errs.append(f"foreshadow.{_fsn} 须为对象")
                 break
+            for _fk in ("planted_ch", "planned_resolve_ch", "resolved_ch"):
+                if _fk in _fsv and _fsv[_fk] is not None and not (
+                        isinstance(_fsv[_fk], int) and not isinstance(_fsv[_fk], bool)
+                        and 0 <= _fsv[_fk] < 2 ** 63):
+                    errs.append(f"foreshadow.{_fsn}.{_fk} 必须是非负整数")
+                    break
     _ov2 = s.get("overview")
     if isinstance(_ov2, dict) and _ov2.get("summary") is not None and not isinstance(_ov2["summary"], str):
         errs.append("overview.summary 须为字符串")
@@ -161,6 +197,9 @@ def validate_state(s: dict) -> list[str]:
         errs.append("characters 须为对象")
     if isinstance(chv, dict):
         for _cn, _cv in chv.items():
+            if not _cn:
+                errs.append("characters 键名不能为空（空键 pwsh7 ConvertFrom-Json 拒读）")
+                break
             if _cv is not None and not isinstance(_cv, dict):
                 errs.append(f"characters.{_cn} 须为对象")
                 break
@@ -282,7 +321,7 @@ def cmd_init(project: Path, input_file: Path | None) -> int:
         return _die(f"检测到存量章节（摘要至第{chapters[-1]}章）——init 会以空渲染覆盖手写圣经；存量项目升级请走 migrate（草案 + --apply）")
     bible = project / "记忆系统" / "圣经" / "故事圣经.md"
     if bible.is_file():
-        head = bible.read_text(encoding="utf-8", errors="replace")[:200]
+        head = bible.read_text(encoding="utf-8-sig", errors="replace")[:200]
         if "derived:state-render" not in head:
             print("⚠️ 检测到非派生圣经文件：init 将以空渲染覆盖其内容（存量/已填充项目请改用 migrate）")
     payload: dict = {}
@@ -290,15 +329,21 @@ def cmd_init(project: Path, input_file: Path | None) -> int:
         if not input_file.is_file():
             return _die(f"输入不存在：{input_file}")
         payload = load_json(input_file)
+    if not isinstance(payload, dict):
+        return _die(f"init 输入须为 JSON 对象：{input_file}（顶层非对象，如数组/标量）")  # 对齐 ps1 判型（原裸 traceback AttributeError）
     st = default_state(str(payload.get("book_title") or project.name))
     for k in ("overview", "context"):
         if isinstance(payload.get(k), dict):
             _deep_merge(st[k], payload[k])
+        elif k in payload:
+            st[k] = payload[k]  # 非对象交由 validate_state 报错（对齐 ps1 拒绝口径）
     for k in ("characters", "foreshadow", "wordcounts", "summaries"):
         if isinstance(payload.get(k), dict):
             st[k].update(payload[k])
-    if isinstance(payload.get("facts"), list):
-        st["facts"] = payload["facts"]
+        elif k in payload:
+            st[k] = payload[k]  # 同上
+    if "facts" in payload:
+        st["facts"] = payload["facts"]  # 非数组交由 validate_state 报「facts 须为数组」（对齐 ps1 拒绝口径）
     errs = validate_state(st)
     if errs:
         return _die("init 输入校验失败：" + "；".join(errs))
@@ -350,6 +395,8 @@ def cmd_commit(project: Path, chapter: int, input_file: Path | None) -> int:
         txn = load_json(input_file)
     except json.JSONDecodeError as exc:
         return _die(f"事务 JSON 解析失败（改事务重跑）：{exc}")
+    if not isinstance(txn, dict):
+        return _die(f"事务须为 JSON 对象：{input_file}（顶层非对象；改事务重跑）")  # 对齐 ps1 同文案 rc1
     _chv = txn.get("chapter")
     if not (isinstance(_chv, int) and not isinstance(_chv, bool)) or _chv != chapter:
         _chv_disp = int(_chv) if isinstance(_chv, float) and _chv.is_integer() else _chv
@@ -393,6 +440,8 @@ def cmd_commit(project: Path, chapter: int, input_file: Path | None) -> int:
     errs = validate_state(st)
     if errs:
         return _die("现有状态单校验失败（先修复再提交）：" + "；".join(errs))
+    if int(st["state_revision"]) >= 2 ** 63 - 1:
+        return _die("state_revision 已到 Int64 上界，自增会溢出（拒绝提交；请人工归零并同步派生视图）")
     if txn["expected_state_revision"] != st["state_revision"]:
         return _die(
             f"stale transaction：expected_state_revision={txn['expected_state_revision']}，"
@@ -455,12 +504,11 @@ def cmd_check(project: Path) -> int:
     except json.JSONDecodeError as exc:
         return _die(f"状态单 JSON 损坏：{exc}")
     errs = validate_state(st)
-    try:
-        views = state_render.render_views(st)
-    except Exception as exc:  # 类型非法但未被 validate 捕获时也不裸崩：中文退出
-        if errs:
-            views = {}
-        else:
+    views = {}
+    if not errs:  # 有校验错即跳过渲染（派生文件=0），与 ps1 同口径，避免渲染容差差异造成计数分叉
+        try:
+            views = state_render.render_views(st)
+        except Exception as exc:  # 类型非法但未被 validate 捕获时也不裸崩：中文退出
             return _die(f"渲染派生视图失败（状态单类型非法：{exc}）")
     bad = state_render.compare_views(project, views) if views else []
     lock = project / LOCK_REL
@@ -469,8 +517,14 @@ def cmd_check(project: Path) -> int:
         age = time.time() - lock.stat().st_mtime
         lock_note = f"；⚠️ 残留锁 {int(age)}s" + ("（超过 300s 下次提交会接管）" if age > LOCK_STALE_SECONDS else "（<300s，可能有提交在进行）")
     print(f"【state-commit check】{project}")
-    _rv = st.get("state_revision"); _lcvh = st.get("last_committed_chapter")
-    print(f"revision={_rv if isinstance(_rv, int) and not isinstance(_rv, bool) else '非法'} last_committed_chapter={_lcvh if isinstance(_lcvh, int) and not isinstance(_lcvh, bool) else '非法'} "
+    _rv = st.get("state_revision") if isinstance(st, dict) else None
+    _lcvh = st.get("last_committed_chapter") if isinstance(st, dict) else None  # 非对象已由 validate 报「不是 JSON 对象」，headline 不裸崩
+    def _hv(v):
+        # headline 归一：非 Int64 内整数统一显示「非法」（对齐 ps1）
+        if isinstance(v, int) and not isinstance(v, bool) and -(2 ** 63) <= v < 2 ** 63:
+            return v
+        return "非法"
+    print(f"revision={_hv(_rv)} last_committed_chapter={_hv(_lcvh)} "
           f"派生文件={len(views)}{lock_note}")
     if errs:
         print(f"❌ 状态单校验失败（{len(errs)} 项）：")
@@ -489,7 +543,7 @@ def cmd_check(project: Path) -> int:
     _summ = st.get("summaries") or {}
     # 只按已有正文的章判 stale（O(实际章数)：last_committed 可达 3e9，线性扫 1..last 会挂死；无正文的章不需要摘要）
     _bodies = sorted({int(m.group(1)) for f in (project / "正文").glob("第*章*") if f.is_file() and (m := re.match(r"第([0-9]+)章", f.name))})
-    _stale = [c for c in _bodies if c <= _last and f"{c:03d}" not in _summ]
+    _stale = [c for c in _bodies if c <= _last and f"{c:03d}" not in _summ and str(c) not in _summ]  # 键零填充/裸数字双形查表（键 "7" 合法）
     if _stale:
         _shown = "、".join(f"第{c:03d}章" for c in _stale[:10])
         if len(_stale) > 10:
@@ -542,7 +596,7 @@ def cmd_migrate(project: Path, apply: bool) -> int:
         title = project.name
         bible = mem / "圣经/故事圣经.md"
         if bible.is_file():
-            first = bible.read_text(encoding="utf-8", errors="replace").lstrip().splitlines()
+            first = bible.read_text(encoding="utf-8-sig", errors="replace").lstrip().splitlines()
             if first and first[0].startswith("#"):
                 title = first[0].lstrip("# ").strip() or title
         chapters = _existing_chapters(project)
@@ -589,10 +643,10 @@ def cmd_migrate(project: Path, apply: bool) -> int:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="状态单唯一写入方")
+    ap = _ArgParser(description="状态单唯一写入方")
     ap.add_argument("command", choices=["init", "draft", "commit", "check", "migrate"])
     ap.add_argument("--project", required=True, help="项目（书名）目录")
-    ap.add_argument("--chapter", type=int, default=0, help="章节号（draft/commit 用）")
+    ap.add_argument("--chapter", type=_i64, default=0, help="章节号（draft/commit 用）")
     ap.add_argument("--input", default=None, help="输入 JSON（init 的 init.json / commit 的事务文件）")
     ap.add_argument("--apply", action="store_true", help="migrate 确认执行（归档旧文件并写入权威 state）")
     args = ap.parse_args()

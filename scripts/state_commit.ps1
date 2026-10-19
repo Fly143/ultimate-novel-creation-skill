@@ -15,13 +15,19 @@
 param(
     [Parameter(Mandatory = $true)][ValidateSet('init', 'draft', 'commit', 'check', 'migrate')][string]$Command,
     [Parameter(Mandatory = $true)][string]$Project,
-    [long]$Chapter = 0,
+    [string]$Chapter = '0',
     [string]$InputFile = '',
     [switch]$Apply
 )
 
 try { [System.Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false) } catch { }
 # fail-closed：写盘/渲染失败必须中止并 rc1，禁止失败仍打 ✅ 并落 .done（门禁语义）
+# 参数错误收敛：纯 ASCII 十进制（[long] 会把 "1e3"/"+5"/"0x10"/" 5"/"" 静默转换，与 py _i64 反向裁决）
+if ($Chapter -notmatch '^-?[0-9]+$') { [Console]::Out.WriteLine('❌ 参数错误：章节号须为纯 ASCII 十进制整数（对齐 py _i64）'); exit 1 }
+$ChapterRaw = $Chapter  # param([string]) 类型约束会把赋值回炉成 String，先存原值再解约束重赋
+Remove-Variable -Name Chapter -Force -ErrorAction SilentlyContinue
+$Chapter = [long]$ChapterRaw
+
 $ErrorActionPreference = 'Stop'
 $enc = New-Object System.Text.UTF8Encoding($false)
 $nl = "`n"
@@ -65,19 +71,19 @@ function Test-StateSchema {
     param($State)
     $errs = @()
     if ($null -eq $State) { return @('状态单不是 JSON 对象') }
+    if ($State -isnot [pscustomobject] -or $State.GetType().FullName -ne 'System.Management.Automation.PSCustomObject') { return @('状态单不是 JSON 对象') }  # 数组/标量判型（PS5.1 数组 -is pscustomobject 恒 True，须按类型全名硬判，对齐 py isinstance(dict)）
     if ($State.schema_version -isnot [int] -and $State.schema_version -isnot [long]) { $errs += ('schema_version 应为 {0}，实际 {1}' -f $SchemaVersion, $(if ($null -eq $State.schema_version) { 'None' } elseif ($State.schema_version -is [double] -or $State.schema_version -is [decimal]) { ([double]$State.schema_version).ToString('0.##########', [System.Globalization.CultureInfo]::InvariantCulture) } else { $State.schema_version })) }
     elseif ([long]$State.schema_version -ne [long]$SchemaVersion) { $errs += ('schema_version 应为 {0}，实际 {1}' -f $SchemaVersion, $State.schema_version) }
     foreach ($k in $RequiredKeys) {
         if ($null -eq $State.PSObject.Properties[$k]) { $errs += ('缺字段：{0}' -f $k) }
     }
-    if ($null -ne $State.state_revision -and -not ($State.state_revision -is [int] -or $State.state_revision -is [long])) {
-        $errs += 'state_revision 必须是整数（乐观锁比较用）'
-    }
-    if ($null -ne $State.imported_through_chapter -and -not ($State.imported_through_chapter -is [int] -or $State.imported_through_chapter -is [long])) {
-        $errs += 'imported_through_chapter 必须是整数'
-    }
-    if ($null -ne $State.last_committed_chapter -and -not ($State.last_committed_chapter -is [int] -or $State.last_committed_chapter -is [long])) {
-        $errs += 'last_committed_chapter 必须是整数'
+    # 三标量：键存在即须为 [int]/[long]（显式 null 与超 Int64（BigInteger/Double）fail-closed，与 py 同判）
+    foreach ($tri in @(@('state_revision', 'state_revision 必须是整数（乐观锁比较用）'),
+                       @('imported_through_chapter', 'imported_through_chapter 必须是整数'),
+                       @('last_committed_chapter', 'last_committed_chapter 必须是整数'))) {
+        if ($null -ne $State.PSObject.Properties[$tri[0]] -and -not ($State.($tri[0]) -is [int] -or $State.($tri[0]) -is [long])) {
+            $errs += $tri[1]
+        }
     }
     if ($null -ne $State.summaries -and $State.summaries -isnot [pscustomobject]) {
         $errs += 'summaries 须为对象'
@@ -97,24 +103,33 @@ function Test-StateSchema {
     elseif ($null -ne $State.facts -and $State.facts -is [array]) {
         for ($fi2 = 0; $fi2 -lt $State.facts.Count; $fi2++) {
             $fe2 = $State.facts[$fi2]
-            if ($null -ne $fe2 -and $fe2 -isnot [pscustomobject]) { $errs += ('facts[{0}] 须为对象' -f $fi2); break }
+            if ($fe2 -isnot [pscustomobject]) { $errs += ('facts[{0}] 须为对象' -f $fi2); break }
         }
     }
     if ($null -ne $State.overview -and $State.overview -is [pscustomobject] -and $State.overview.stages -is [array]) {
-        foreach ($se in $State.overview.stages) { if ($null -ne $se -and $se -isnot [string] -and $se -isnot [pscustomobject]) { $errs += 'overview.stages 元素须为字符串或对象'; break } }
+        foreach ($se in $State.overview.stages) { if ($se -isnot [string] -and $se -isnot [pscustomobject]) { $errs += 'overview.stages 元素须为字符串或对象'; break } }
     }
     if ($null -ne $State.timeline -and $State.timeline -is [pscustomobject]) {
         foreach ($tk in @('readers_known','authors_truth')) {
             $pvt = $State.timeline.PSObject.Properties[$tk]
             if ($null -ne $pvt -and $null -ne $pvt.Value -and $pvt.Value -isnot [array]) { $errs += ('timeline.{0} 须为数组' -f $tk) }
             elseif ($null -ne $pvt -and $pvt.Value -is [array]) {
-                foreach ($te in $pvt.Value) { if ($null -ne $te -and $te -isnot [string] -and $te -isnot [pscustomobject]) { $errs += ('timeline.{0} 元素须为字符串或对象' -f $tk); break } }
+                foreach ($te in $pvt.Value) { if ($te -isnot [string] -and $te -isnot [pscustomobject]) { $errs += ('timeline.{0} 元素须为字符串或对象' -f $tk); break } }
             }
         }
     }
     if ($null -ne $State.foreshadow -and $State.foreshadow -isnot [pscustomobject]) { $errs += 'foreshadow 须为对象' }
     elseif ($null -ne $State.foreshadow -and $State.foreshadow -is [pscustomobject]) {
-        foreach ($fsv2 in $State.foreshadow.PSObject.Properties) { if ($null -ne $fsv2.Value -and $fsv2.Value -isnot [pscustomobject]) { $errs += ('foreshadow.{0} 须为对象' -f $fsv2.Name); break } }
+        foreach ($fsv2 in $State.foreshadow.PSObject.Properties) {
+            if ([string]$fsv2.Name -eq '') { $errs += 'foreshadow 键名不能为空（空键 pwsh7 ConvertFrom-Json 拒读）'; break }
+            if ($fsv2.Value -isnot [pscustomobject]) { $errs += ('foreshadow.{0} 须为对象' -f $fsv2.Name); break }
+            foreach ($ffk in @('planted_ch', 'planned_resolve_ch', 'resolved_ch')) {
+                $ffp = $fsv2.Value.PSObject.Properties[$ffk]
+                if ($null -ne $ffp -and $null -ne $ffp.Value -and (-not ($ffp.Value -is [int] -or $ffp.Value -is [long]) -or [long]$ffp.Value -lt 0)) {
+                    $errs += ('foreshadow.{0}.{1} 必须是非负整数' -f $fsv2.Name, $ffk); break
+                }
+            }
+        }
     }
     if ($null -ne $State.overview -and $State.overview -is [pscustomobject] -and $null -ne $State.overview.PSObject.Properties['summary'] -and $null -ne $State.overview.summary -and $State.overview.summary -isnot [string]) { $errs += 'overview.summary 须为字符串' }
     if ($null -ne $State.context -and $State.context -is [pscustomobject]) {
@@ -125,12 +140,13 @@ function Test-StateSchema {
     }
     if ($null -ne $State.characters -and $State.characters -is [pscustomobject]) {
         foreach ($ce in $State.characters.PSObject.Properties) {
+            if ([string]$ce.Name -eq '') { $errs += 'characters 键名不能为空（空键 pwsh7 ConvertFrom-Json 拒读）'; break }
             if ($ce.Value -is [pscustomobject]) {
                 foreach ($ak in @('aliases','known_facts')) {
                     $pva = $ce.Value.PSObject.Properties[$ak]
                     if ($null -ne $pva -and $null -ne $pva.Value -and $pva.Value -isnot [array]) { $errs += ('characters.{0}.{1} 须为数组' -f $ce.Name, $ak) }
                     elseif ($null -ne $pva -and $pva.Value -is [array]) {
-                        foreach ($ae in $pva.Value) { if ($null -ne $ae -and $ae -isnot [string]) { $errs += ('characters.{0}.{1} 元素须为字符串' -f $ce.Name, $ak); break } }
+                        foreach ($ae in $pva.Value) { if ($ae -isnot [string]) { $errs += ('characters.{0}.{1} 元素须为字符串' -f $ce.Name, $ak); break } }
                     }
                 }
             }
@@ -173,12 +189,12 @@ function New-DefaultState {
         wordcounts               = [ordered]@{}
     }
     # 嵌套 [ordered] 需转成 PSCustomObject 树，否则 .PSObject.Properties 查不到内层键（校验/合并都会踩）
-    return (([pscustomobject]$st | ConvertTo-Json -Depth 12) | ConvertFrom-Json)
+    return (([pscustomobject]$st | ConvertTo-Json -Depth 100) | ConvertFrom-Json)
 }
 
 function ConvertTo-StateJson {
     param($State)
-    return ($State | ConvertTo-Json -Depth 12) + $nl
+    return ($State | ConvertTo-Json -Depth 100) + $nl
 }
 
 function Write-StateFile {
@@ -187,6 +203,19 @@ function Write-StateFile {
     $tmp = $p + '.tmp'
     Write-Utf8File -Path $tmp -Text (ConvertTo-StateJson $State)
     Move-Item -LiteralPath $tmp -Destination $p -Force
+}
+
+function Merge-InitDefault {
+    # 递归合并（对齐 py _deep_merge）：嵌套对象保留默认键，非对象值整体替换
+    param($Dst, $Src)
+    foreach ($sp in $Src.PSObject.Properties) {
+        $dp = $Dst.PSObject.Properties[[string]$sp.Name]
+        if ($null -ne $sp.Value -and $sp.Value -is [pscustomobject] -and $null -ne $dp -and $dp.Value -is [pscustomobject]) {
+            Merge-InitDefault -Dst $dp.Value -Src $sp.Value
+        } else {
+            Set-NoteProperty -Obj $Dst -Name ([string]$sp.Name) -Value $sp.Value
+        }
+    }
 }
 
 function Set-NoteProperty {
@@ -205,7 +234,7 @@ function Get-LineText {
             if ($null -ne $prop -and $null -ne $prop.Value -and [string]$prop.Value -ne '') { $parts += [string]$prop.Value }
         }
         if ($parts.Count) { return ($parts -join ' | ') }
-        return ($Entry | ConvertTo-Json -Compress -Depth 6)
+        return ($Entry | ConvertTo-Json -Compress -Depth 100)
     }
     return [string]$Entry
 }
@@ -473,7 +502,7 @@ function Merge-Delta {
 # ---------------- 命令实现 ----------------
 $ProjectPath = $Project
 if (-not [System.IO.Path]::IsPathRooted($ProjectPath)) { $ProjectPath = Join-Path (Get-Location).Path $Project }
-if (-not (Test-Path -LiteralPath $ProjectPath)) { Write-Output ('❌ 项目目录不存在：{0}' -f $ProjectPath); exit 1 }
+if (-not (Test-Path -LiteralPath $ProjectPath -PathType Container)) { Write-Output ('❌ 项目目录不存在：{0}' -f $ProjectPath); exit 1 }  # Container 判定（对齐 py is_dir / check-done.ps1:65）
 
 $sp = Get-StatePath $ProjectPath
 
@@ -492,26 +521,36 @@ switch ($Command) {
         }
         $payload = [pscustomobject]@{}
         if ($InputFile -ne '') {
-            if (-not (Test-Path -LiteralPath $InputFile)) { Write-Output ('❌ 输入不存在：{0}' -f $InputFile); exit 1 }
-            $payload = Get-Content -LiteralPath $InputFile -Raw -Encoding UTF8 | ConvertFrom-Json
+            if (-not (Test-Path -LiteralPath $InputFile -PathType Leaf)) { Write-Output ('❌ 输入不存在：{0}' -f $InputFile); exit 1 }  # Leaf 判定（目录亦判不存在，对齐 py is_file）
+            try { $payload = Get-Content -LiteralPath $InputFile -Raw -Encoding UTF8 | ConvertFrom-Json }
+            catch { Write-Output ('❌ 状态单 JSON 损坏：{0}（init 输入 JSON 空键名；pwsh7 ConvertFrom-Json 拒读）' -f $_.Exception.Message); exit 1 }  # 文案头对齐 py load_json；详情归引擎 stderr 不比对
+            if ($null -eq $payload -or $payload -isnot [pscustomobject] -or $payload.GetType().FullName -ne 'System.Management.Automation.PSCustomObject') {
+                Write-Output ('❌ init 输入须为 JSON 对象：{0}（顶层非对象，如数组/标量）' -f $InputFile); exit 1  # 对齐 py 判型（原 fail-open 静默落盘）
+            }
         }
         $title = $ProjectPath | Split-Path -Leaf
         if ($null -ne $payload.PSObject.Properties['book_title'] -and [string]$payload.book_title -ne '') { $title = [string]$payload.book_title }
         $st = New-DefaultState -BookTitle $title
+        # 判型守卫：非对象值交由 Test-StateSchema 报错（防字符串枚举 CLR 属性 Length/Chars 污染权威 state）
         foreach ($k in @('overview', 'context')) {
             $prop = $payload.PSObject.Properties[$k]
             if ($null -ne $prop -and $null -ne $prop.Value) {
-                foreach ($f in $prop.Value.PSObject.Properties) { Set-NoteProperty -Obj $st.$k -Name ([string]$f.Name) -Value $f.Value }
+                if ($prop.Value -isnot [pscustomobject]) { $st.$k = $prop.Value }
+                else { Merge-InitDefault -Dst $st.$k -Src $prop.Value }  # 递归合并，保留默认键（对齐 py _deep_merge）
             }
         }
         foreach ($k in @('characters', 'foreshadow', 'wordcounts', 'summaries')) {
             $prop = $payload.PSObject.Properties[$k]
             if ($null -ne $prop -and $null -ne $prop.Value) {
-                foreach ($f in $prop.Value.PSObject.Properties) { Set-NoteProperty -Obj $st.$k -Name ([string]$f.Name) -Value $f.Value }
+                if ($prop.Value -isnot [pscustomobject]) { $st.$k = $prop.Value }
+                else { foreach ($f in $prop.Value.PSObject.Properties) { Set-NoteProperty -Obj $st.$k -Name ([string]$f.Name) -Value $f.Value } }
             }
         }
         $prop = $payload.PSObject.Properties['facts']
-        if ($null -ne $prop -and $null -ne $prop.Value) { $st.facts = @($prop.Value) }
+        if ($null -ne $prop -and $null -ne $prop.Value) {
+            # PS5.1 对单元素 JSON 数组解包为标量 → 数组态显式重包；非数组交由 schema 报「facts 须为数组」（对齐 py）
+            if ($prop.Value -is [array]) { $st.facts = @($prop.Value) } else { $st.facts = $prop.Value }
+        }
         $errs = Test-StateSchema $st
         if ($errs.Count) { Write-Output ('❌ init 输入校验失败：{0}' -f ($errs -join '；')); exit 1 }
         Write-StateFile -Project $ProjectPath -State $st
@@ -538,7 +577,7 @@ switch ($Command) {
                 summaries  = [ordered]@{}; wordcounts = [ordered]@{}; overview = [ordered]@{}; context = [ordered]@{}
             }
         }
-        Write-Utf8File -Path $txnDir -Text (([pscustomobject]$txn | ConvertTo-Json -Depth 8) + $nl)
+        Write-Utf8File -Path $txnDir -Text (([pscustomobject]$txn | ConvertTo-Json -Depth 100) + $nl)
         Write-Output ('✅ 草稿已生成：{0}（expected_state_revision={1}）' -f (Get-RelPath $ProjectPath $txnDir), [long]$st.state_revision)
         exit 0
     }
@@ -546,9 +585,12 @@ switch ($Command) {
     'commit' {
         if (-not (Test-Path -LiteralPath $sp)) { Write-Output ('❌ 缺少 {0}（先 init 或 migrate --apply）' -f $StateRel); exit 1 }
         if ($Chapter -lt 0) { Write-Output '❌ --chapter 必须 ≥0（--chapter 0 = 大纲阶段种子提交，不产生 .done 标记）'; exit 1 }
-        if ($InputFile -eq '' -or -not (Test-Path -LiteralPath $InputFile)) { Write-Output '❌ 事务文件缺失（-InputFile）；用 draft 生成后填写再提交'; exit 1 }
+        if ($InputFile -eq '' -or -not (Test-Path -LiteralPath $InputFile -PathType Leaf)) { Write-Output '❌ 事务文件缺失（-InputFile）；用 draft 生成后填写再提交'; exit 1 }  # Leaf 判定（对齐 py is_file）
         try { $txn = Get-Content -LiteralPath $InputFile -Raw -Encoding UTF8 | ConvertFrom-Json }
         catch { Write-Output ('❌ 事务 JSON 解析失败（改事务重跑）：{0}' -f $_.Exception.Message); exit 1 }
+        if ($null -eq $txn -or $txn -isnot [pscustomobject] -or $txn.GetType().FullName -ne 'System.Management.Automation.PSCustomObject') {
+            Write-Output ('❌ 事务须为 JSON 对象：{0}（顶层非对象；改事务重跑）' -f $InputFile); exit 1  # 对齐 py 判型
+        }
         if ($txn.chapter -isnot [int] -and $txn.chapter -isnot [long]) { Write-Output ('❌ 事务 chapter={0} 与 -Chapter {1} 不符（改事务重跑）' -f $(if ($null -eq $txn.chapter) { 'None' } elseif ($txn.chapter -is [double] -or $txn.chapter -is [decimal]) { ([double]$txn.chapter).ToString('0.##########', [System.Globalization.CultureInfo]::InvariantCulture) } else { $txn.chapter }), $Chapter); exit 1 }
         elseif ([long]$txn.chapter -ne [long]$Chapter) { Write-Output ('❌ 事务 chapter={0} 与 -Chapter {1} 不符（改事务重跑）' -f $txn.chapter, $Chapter); exit 1 }
         $expProp = $txn.PSObject.Properties['expected_state_revision']
@@ -589,6 +631,10 @@ switch ($Command) {
         $st = Get-Content -LiteralPath $sp -Raw -Encoding UTF8 | ConvertFrom-Json
         $errs = Test-StateSchema $st
         if ($errs.Count) { Write-Output ('❌ 现有状态单校验失败（先修复再提交）：{0}' -f ($errs -join '；')); exit 1 }
+        if ([long]$st.state_revision -eq [long]::MaxValue) {
+            Write-Output '❌ state_revision 已到 Int64 上界，自增会溢出（拒绝提交；请人工归零并同步派生视图）'
+            exit 1
+        }
         if ([long]$txn.expected_state_revision -ne [long]$st.state_revision) {
             Write-Output ('❌ stale transaction：expected_state_revision={0}，当前 state_revision={1}（重跑 draft 取新 revision 再提交）' -f [long]$txn.expected_state_revision, [long]$st.state_revision)
             exit 1
@@ -652,12 +698,18 @@ switch ($Command) {
 
     'check' {
         if (-not (Test-Path -LiteralPath $sp)) { Write-Output ('❌ 缺少 {0}（存量项目走旧路径即可，无需本命令）' -f $StateRel); exit 1 }
+        # 已知口径：PS5.1 的 ConvertFrom-Json 对超双精度字面量（如 1e400）在解析层拒绝（下行走「JSON 损坏」），
+        # py/pwsh7 则解析为 Infinity 并进入类型校验报「必须是整数」——三引擎均 rc1 fail-closed，主行类别差异为已声明口径
         try { $st = Get-Content -LiteralPath $sp -Raw -Encoding UTF8 | ConvertFrom-Json }
         catch { Write-Output ('❌ 状态单 JSON 损坏：{0}' -f $_.Exception.Message); exit 1 }
         $errs = Test-StateSchema $st
         $views = $null
-        try { $views = Get-DerivedViews $st } catch {
-            if ($errs.Count) { $views = @{} } else { Write-Output ('❌ 渲染派生视图失败（状态单类型非法：{0}）' -f $_.Exception.Message); exit 1 }
+        if ($errs.Count) {
+            $views = @{}   # 有校验错即跳过渲染（派生文件=0），与 py 同口径
+        } else {
+            try { $views = Get-DerivedViews $st } catch {
+                Write-Output ('❌ 渲染派生视图失败（状态单类型非法：{0}）' -f $_.Exception.Message); exit 1
+            }
         }
         $bad = if ($null -ne $views -and $views.Count) { Compare-DerivedViews -Project $ProjectPath -Views $views } else { @() }
         $lockPath = Join-Path $ProjectPath ($LockRel -replace '/', [string][char]92)
@@ -694,7 +746,7 @@ $staleChs = @()
 $bodyDir = Join-Path $ProjectPath '正文'
 if (Test-Path -LiteralPath $bodyDir) {
     foreach ($bf in Get-ChildItem -LiteralPath $bodyDir -Filter '第*章*' -File) {
-        if ($bf.Name -match '^第([0-9]+)章') { $c = 0L; if ([long]::TryParse($Matches[1], [ref]$c) -and $c -le $lastCh -and -not $summKeys.ContainsKey(('{0:D3}' -f $c))) { $staleChs += $c } }
+        if ($bf.Name -match '^第([0-9]+)章') { $c = 0L; if ([long]::TryParse($Matches[1], [ref]$c) -and $c -le $lastCh -and -not $summKeys.ContainsKey(('{0:D3}' -f $c)) -and -not $summKeys.ContainsKey([string]$c)) { $staleChs += $c } }  # 键零填充/裸数字双形查表（键 "7" 合法）
     }
 }
 $staleChs = @($staleChs | Sort-Object)

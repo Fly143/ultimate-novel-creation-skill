@@ -16,15 +16,49 @@ import glob
 import hashlib
 import json
 import os
+import re
 import sys
+
+def _i64(s):
+    # Int64 范围收口（对齐 ps1 [long] 绑定失败 rc1 / check-doc-budget _in_i64 先例）
+    _t = str(s)
+    if not re.fullmatch(r"-?[0-9]+", _t):  # 纯 ASCII 十进制（int(…,10) 会接受下划线/非 ASCII 数字如 3_0/١٢，ps1 [long] 绑定拒绝 → 反向裁决）
+        raise argparse.ArgumentTypeError(f"非十进制整数：{s}")
+    try:
+        v = int(_t, 10)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"非十进制整数：{s}")
+    if not (-2**63 <= v < 2**63):
+        raise argparse.ArgumentTypeError(f"超出 Int64 范围：{s}")
+    return v
+
+
+class _ArgParser(argparse.ArgumentParser):
+    # 参数错误收敛 rc1 + 中文（对齐 check-done/check-doc-budget/detect；ps1 绑定失败亦 rc1）
+    def error(self, message):
+        print(f"❌ 参数错误：{message}")
+        raise SystemExit(1)
+
 
 LEDGER_REL = os.path.join(".story", "text-digests.json")
 RULES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "check-done-rules.json")
 
 
 def body_globs():
-    with open(RULES_PATH, encoding="utf-8") as f:
-        return json.load(f)["body_globs"]
+    if not os.path.isfile(RULES_PATH):
+        print(f"❌ 缺少规则单源：{RULES_PATH}")
+        raise SystemExit(1)
+    try:
+        with open(RULES_PATH, encoding="utf-8-sig") as f:
+            _rules = json.load(f)
+    except ValueError as exc:
+        print(f"❌ 规则单源解析失败：{RULES_PATH}")  # 对齐 check-done/check-doc-budget 同场景中文
+        print(f"解析详情：{exc}", file=sys.stderr)
+        raise SystemExit(1)
+    if not isinstance(_rules, dict) or "body_globs" not in _rules:
+        print(f"❌ 规则单源解析失败：{RULES_PATH}（须为含 body_globs 的 JSON 对象）")  # 对齐 check-done/check-doc-budget 同场景（原 KeyError 裸崩）
+        raise SystemExit(1)
+    return _rules["body_globs"]
 
 
 def find_body(project, ch):
@@ -38,7 +72,8 @@ def find_body(project, ch):
 def digest_of(path):
     with open(path, "rb") as f:
         data = f.read()
-    units = len(data.decode("utf-8").replace("\r\n", "\n").encode("utf-16-le")) // 2
+    # 已知口径：PS5.1（.NET Framework）对个别非法 UTF-8 序列（如 E0 80）替换粒度少 1 个 U+FFFD → units 展示可差 1；sha256 为字节级不受影响，verify 语义三引擎一致
+    units = len(data.decode("utf-8", errors="replace").replace("\r\n", "\n").encode("utf-16-le")) // 2
     return hashlib.sha256(data).hexdigest(), units
 
 
@@ -50,8 +85,17 @@ def load_ledger(project):
     p = ledger_path(project)
     if not os.path.exists(p):
         return {"version": 1, "chapters": {}}
-    with open(p, encoding="utf-8") as f:
-        return json.load(f)
+    try:
+        with open(p, encoding="utf-8-sig") as f:
+            data = json.load(f)
+    except ValueError as exc:
+        print(f"❌ 账本 JSON 损坏：{p}（可删 .story/text-digests.json 重新 digest 生成）")  # 分隔符固定正斜杠（os.path.join 在 Win 产反斜杠，与 ps1 文案不一致）
+        print(f"解析详情：{exc}", file=sys.stderr)
+        raise SystemExit(1)
+    if not isinstance(data, dict):
+        print(f"❌ 账本须为 JSON 对象：{p}（顶层非对象，如数组/标量）")  # 对齐 check-done 规则单同款判型（原 TypeError 裸崩 / ps1 误判「无记录」rc2）
+        raise SystemExit(1)
+    return data
 
 
 def save_ledger(project, ledger):
@@ -68,10 +112,10 @@ def short(sha):
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = _ArgParser()
     ap.add_argument("command", choices=["digest", "verify", "verify-all"])
     ap.add_argument("--project", "-p", required=True)
-    ap.add_argument("--chapter", "-c", type=int, default=0)
+    ap.add_argument("--chapter", "-c", type=_i64, default=0)
     a = ap.parse_args()
 
     ledger = load_ledger(a.project)

@@ -8,13 +8,16 @@
 use strict; use warnings;
 use utf8;
 binmode(STDOUT, ":encoding(UTF-8)");
+binmode(STDERR, ":encoding(UTF-8)");  # 中文 die/警告不再触发英文 Wide character 行
 
-my $path = shift or die "用法: perl fingerprint.pl <正文.txt>\n";
-open(my $fh, "<:encoding(UTF-8)", $path) or die "无法打开 $path: $!\n";
+my $path = shift or do { print STDERR "用法: perl fingerprint.pl <正文.txt>\n"; exit 1 };
+if (@ARGV) { print STDERR "❌ 参数错误：多余参数 @ARGV\n"; exit 1 }  # 对齐 py/ps1 rc1（不再静默忽略）
+open(my $fh, "<:encoding(UTF-8)", $path) or do { print STDERR "无法打开 $path: $!\n"; exit 1 };
 my $t = do { local $/; <$fh> };
 close($fh);
+$t =~ s/^\x{FEFF}//;  # 与 py utf-8-sig / ps1 ReadAllText 同口径：剥 BOM
 my $total = length($t);
-die "文件为空\n" if $total == 0;
+if ($total == 0) { print STDERR "文件为空\n"; exit 1 }
 
 # 段落（按换行切）
 my @paras;
@@ -23,8 +26,9 @@ for my $line (split(/\r?\n/, $t)) {
     push @paras, $line if length($line) > 0;
 }
 my @pl = sort { $a <=> $b } map { length($_) } @paras;
+if (!@pl) { print "❌ 无可统计段落（正文仅含空白），无法计算段落分布\n"; exit 1; }
 my $pAvg = int(0.5 + (eval join "+", @pl) / @pl);
-my $pMed = $pl[int($#pl/2)];
+my $pMed = $pl[int(scalar(@pl)/2)];  # 上中位（对齐 py pl[len//2] / ps1 Floor(Count/2)，偶数样本不再取下中位）
 my ($p50, $p100) = (0,0);
 $p50++ for grep { $_ <= 50 } @pl; $p100++ for grep { $_ <= 100 } @pl;
 $p50 = sprintf("%.1f", 100.0*$p50/@pl); $p100 = sprintf("%.1f", 100.0*$p100/@pl);
@@ -38,8 +42,9 @@ while ($raw =~ /([^。！？!?…；;]+)([。！？!?…；;]?)/g) {
     push @sents, $s if length($s) > 0 && length($s) < 300;
 }
 @sl = sort { $a <=> $b } map { length($_) } @sents;
+if (!@sl) { print "❌ 无可统计句子（全部句子 ≥300 单元，无法计算句长分布）\n"; exit 1; }
 my $sSum = 0; $sSum += $_ for @sl;
-my $sAvg = sprintf("%.1f", $sSum/@sl); my $sMed = $sl[int($#sl/2)];
+my $sAvg = sprintf("%.1f", $sSum/@sl); my $sMed = $sl[int(scalar(@sl)/2)];  # 上中位（对齐 py/ps1）
 my ($s12, $s20) = (0,0);
 $s12++ for grep { $_ <= 12 } @sl; $s20++ for grep { $_ <= 20 } @sl;
 $s12 = sprintf("%.1f", 100.0*$s12/@sl); $s20 = sprintf("%.1f", 100.0*$s20/@sl);
@@ -54,7 +59,7 @@ while ($raw =~ /([^，。！？!?…；;、]+)([，、]?)/g) {
     push @cl, length($c) if length($c) > 0;
 }
 my $cSum = 0; $cSum += $_ for @cl;
-my $cAvg = sprintf("%.1f", $cSum/@cl);
+my $cAvg = @cl ? sprintf("%.1f", $cSum/@cl) : "0.0";  # 空集均值 0.0（对齐 ps1 Measure-Object 空集→0）
 
 # 对话占比（引号内字符，$& 取整段匹配；两组引号均可）
 my $dqSum = 0; $dqSum += length($&) while $raw =~ /“[^”]*”|「[^」]*」/g;

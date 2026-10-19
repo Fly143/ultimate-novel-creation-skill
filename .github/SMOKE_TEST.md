@@ -57,7 +57,7 @@
 
 ## 第 6 步：旧项目迁移（如存在 v9.4.0 前项目）
 
-- [ ] 用 `scripts/migrate_memory_paths.ps1 -WhatIf` 预览 → 确认后再 `-Apply`
+- [ ] 用 `scripts/migrate_memory_paths.ps1`（不带 -Apply 即预览）→ 确认后再 -Apply
 - [ ] 迁移后新会话「继续写」能定位旧项目
 
 ---

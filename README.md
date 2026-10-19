@@ -282,9 +282,9 @@ v9.6.0 写后流水线要点：
 ├── SKILL.md              # 技能入口 + 路径约定
 ├── system_prompt.md      # 宿主 system prompt（强制 agent 遵守流程，使用前必配）
 ├── modules/              # 33 个模块文件（28 功能模块 + 2 拆分执行规格 03_26B/C + 3 核心协议/规范 00/01/02）
-├── references/           # 15+3 个精选写作参考（含 rulesets/ 规则集子目录）
+├── references/           # 14+3 个精选写作参考（含 rulesets/ 规则集子目录）
 ├── templates/            # 19+3 个输出模板（含 constraints/ 约束模板子目录；含章节任务书模板）
-├── scripts/              # 指纹/词频统计（py/perl/pwsh 多实现同口径）+ 章节 .done 客观核验（check-done.py/ps1）+ 状态单真源（state_commit.py/ps1 + state_render.py）+ AI 味启发式检测（detect_ai_text.py/ps1 + ai-tells.txt）+ 正文指纹/手改保护（text_guard.py/ps1）+ 发布包打包校验（package_skill.py/ps1）+ 热路径文档预算守卫（doc-budget.json + check-doc-budget.py/ps1）+ 旧项目路径迁移
+├── scripts/              # 指纹（py/pwsh 同口径；perl 为降级路径近似口径——均值舍入与段落切分集合略宽）/ 词频统计（wordfreq.byte.pl 单实现，无 perl 时主观目测降级）/ 伏笔时间线（foreshadow_timeline py/ps1 双实现）+ 章节 .done 客观核验（check-done.py/ps1）+ 状态单真源（state_commit.py/ps1 + state_render.py）+ AI 味启发式检测（detect_ai_text.py/ps1 + ai-tells.txt）+ 正文指纹/手改保护（text_guard.py/ps1）+ 发布包打包校验（package_skill.py/ps1）+ 热路径文档预算守卫（doc-budget.json + check-doc-budget.py/ps1）+ 旧项目路径迁移（migrate_memory_paths.ps1 单实现，随 release Assets 分发）
 ├── .github/              # 维护者工具：workflows/audit.yml + scripts/audit.ps1 + SMOKE_TEST.md + specs/（开发规格，不进 skill 运行时）
 └── memory-system/        # 记忆系统模板（skill 内只读，中英对照见 SKILL.md）
     ├── bible/            # 故事圣经 → 故事圣经/人物弧线/剧情时间线/伏笔清单/角色数据库
@@ -311,7 +311,7 @@ v9.6.0 写后流水线要点：
 - **Bible 文档增长控制**：超 30KB 自动压缩远古内容，细节下沉到卷压缩，按需回读
 - **五道生成门禁**：引用校验/一致性校验/蓝图出场校验/未知实体检测/描写一致性，不通过不视为完成
 - **风格质量检查**：语言风格统一性/叙述视角一致性/文风成熟度（03_13，并入全量审核子代理 U 的 F 项）
-- **15+3 个精选写作参考**：爽文理论、爽点设计（含进阶体系）、黄金开篇、风格技巧、打斗场景、高级写作技法、朱雀AIGC检测对策、真人指纹实测、首战必胜逻辑链、书名生成策略、爽文五阶段设定框架、写后流水线细则、维护者工具、规则集系统（通用默认+赛博-技术流，支持自定义）等
+- **14+3 个精选写作参考**：爽文理论、爽点设计（含进阶体系）、黄金开篇、风格技巧、打斗场景、高级写作技法、朱雀AIGC检测对策、真人指纹实测、首战必胜逻辑链、书名生成策略、爽文五阶段设定框架、写后流水线细则、规则集系统（通用默认+赛博-技术流，支持自定义）等
 - **19+3 个精选模板**：立项定位单、文风设定、世界观、人设卡、人物关系、情节大纲、章节规划、单章结构、章节档案（章级留痕+YAML参数链）、质量检查、朱雀去AI化检查清单、约束系统（金手指/时间/叙事线）等
 
 ## 快速开始

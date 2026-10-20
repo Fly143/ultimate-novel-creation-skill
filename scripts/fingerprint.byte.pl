@@ -3,7 +3,7 @@
 # 全能小说作家 - 正文分布统计脚本（perl 字节级零依赖版）
 # 适用：缺 Encode/PerlIO 的精简 perl 环境（如 mawk+精简perl 沙箱），
 #       不依赖任何非核心模块，纯字节级 UTF-8 处理。
-# 口径与 fingerprint.pl / fingerprint.py / fingerprint.ps1 完全一致
+# 口径近似 fingerprint.pl（同为降级：均值半入、码点计数——非 BMP 与 py/ps1 码元口径差 1；空白集更窄仅 7 类字符，\x85/U+2028 等不切段，段长/句长均值可偏宽；输出多汉字数辅助字段，见 README）
 # （总字数=全部字符；句长=句内字符数；方差=总体方差 Σ(x-μ)²/n）。
 #
 # 用法:
@@ -17,11 +17,12 @@
 # ============================================================
 use strict; use warnings;
 
-my $path = shift or die "用法: perl fingerprint.byte.pl <正文.txt> [--skip-first] [--stop-at-dashes]\n";
+my $path = shift or do { print STDERR "用法: perl fingerprint.byte.pl <正文.txt> [--skip-first] [--stop-at-dashes]\n"; exit 1 };
 my ($skipFirst, $stopDashes) = (0, 0);
 for (@ARGV) {
-    $skipFirst = 1 if $_ eq "--skip-first";
-    $stopDashes = 1 if $_ eq "--stop-at-dashes";
+    if ($_ eq "--skip-first") { $skipFirst = 1 }
+    elsif ($_ eq "--stop-at-dashes") { $stopDashes = 1 }
+    else { print STDERR "❌ 参数错误：未知参数 $_\n"; exit 1 }  # 对齐 py/ps1 rc1（不再静默忽略）
 }
 
 # ---- 字节级 UTF-8 序列常量（\x 转义，源码为纯 ASCII，避免任何编码问题）----
@@ -41,16 +42,18 @@ sub charcount { my $s = shift; my $n = 0; $n++ while $s =~ /$CHAR/g; return $n; 
 sub nonsep_run { my $SEP = shift; return qr/(?:(?!$SEP)$CHAR)+/; }
 
 # ---- 读文件（原始字节，不解码）----
-open(my $fh, "<", $path) or die "无法打开 $path: $!\n";
+open(my $fh, "<", $path) or do { print STDERR "无法打开 $path: $!\n"; exit 1 };
 binmode($fh);
 local $/;
 my $t = <$fh>;
 close($fh);
-die "文件为空\n" unless length($t) > 0;
+$t =~ s/^\xEF\xBB\xBF//;  # 与 py/ps1 同口径：剥 BOM
+unless (length($t) > 0) { print STDERR "文件为空\n"; exit 1 }
 
 # ---- 可选截断/跳标题（先截元数据再跳首行，顺序保证标题在元数据之前）----
 if ($stopDashes)  { $t =~ s/\r?\n----.*$//s; }
 if ($skipFirst)   { $t =~ s/^[^\r\n]*\r?\n//; }
+unless (charcount($t) > 0) { print STDERR "文件为空\n"; exit 1 }  # 截断/跳行后为空（对齐 py/ps1 空集口径）
 
 my $total = charcount($t);                 # 总字符数（含标点，同 fingerprint.pl 的 length）
 my $han = 0; $han++ while $t =~ /[\xE4-\xE9][\x80-\xBF][\x80-\xBF]/g;  # 汉字数（辅助参考）
@@ -62,9 +65,10 @@ for my $line (split(/\r?\n/, $t)) {
     push @paras, $line if length($line) > 0;
 }
 my @pl = sort { $a <=> $b } map { charcount($_) } @paras;
+if (!@pl) { print "❌ 无可统计段落（正文仅含空白），无法计算段落分布\n"; exit 1 }  # 对齐 fingerprint.pl 空集守卫（无段落即中止）
 my $pSum = 0; $pSum += $_ for @pl;
 my $pAvg = int(0.5 + $pSum/@pl);
-my $pMed = $pl[int($#pl/2)];
+my $pMed = $pl[int(scalar(@pl)/2)];  # 上中位（对齐 py pl[len//2] / ps1 Floor(Count/2)，偶数样本不再取下中位）
 my ($p50, $p100) = (0, 0);
 $p50++ for grep { $_ <= 50 } @pl; $p100++ for grep { $_ <= 100 } @pl;
 $p50 = sprintf("%.1f", 100.0*$p50/@pl); $p100 = sprintf("%.1f", 100.0*$p100/@pl);
@@ -80,8 +84,9 @@ while ($raw =~ /($NONSENT)($TERM)?/g) {
     push @sl, $L if $L > 0 && $L < 300;
 }
 @sl = sort { $a <=> $b } @sl;
+if (!@sl) { print "❌ 无可统计句子（全部句子 ≥300 单元，无法计算句长分布）\n"; exit 1 }  # 对齐 fingerprint.pl 无句子守卫
 my $sSum = 0; $sSum += $_ for @sl;
-my $sAvg = sprintf("%.1f", $sSum/@sl); my $sMed = $sl[int($#sl/2)];
+my $sAvg = sprintf("%.1f", $sSum/@sl); my $sMed = $sl[int(scalar(@sl)/2)];  # 上中位（对齐 py/ps1）
 my ($s12, $s20) = (0, 0);
 $s12++ for grep { $_ <= 12 } @sl; $s20++ for grep { $_ <= 20 } @sl;
 $s12 = sprintf("%.1f", 100.0*$s12/@sl); $s20 = sprintf("%.1f", 100.0*$s20/@sl);
@@ -99,7 +104,7 @@ while ($raw =~ /($NONALL)($COMMA)?/g) {
     push @cl, $L if $L > 0;
 }
 my $cSum = 0; $cSum += $_ for @cl;
-my $cAvg = sprintf("%.1f", $cSum/@cl);
+my $cAvg = @cl ? sprintf("%.1f", $cSum/@cl) : "0.0";  # 空集均值 0.0（对齐 fingerprint.pl 空集分支 / ps1 Measure-Object）
 
 # ---- 对话占比（“…”或「…」，含引号字符，同 fingerprint.pl 的 $&）----
 # ★v9.5.7 修复：字节模式负向前瞻 (?:(?!右引号).)* 会跨过右引号（中间字节被 . 消费），

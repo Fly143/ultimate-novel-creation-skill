@@ -20,7 +20,9 @@ param(
 if ($FailOver -notmatch '^-?[0-9]+$') { [Console]::Out.WriteLine('❌ 参数错误：--fail-over 须为纯 ASCII 十进制整数（对齐 py _i64）'); exit 1 }
 $FailOverRaw = $FailOver  # param([string]) 类型约束会把赋值回炉成 String，先存原值再解约束重赋
 Remove-Variable -Name FailOver -Force -ErrorAction SilentlyContinue
-$FailOver = [long]$FailOverRaw
+$_cvtFailOver = 0L
+if (-not [long]::TryParse($FailOverRaw, [Globalization.NumberStyles]::Integer, [Globalization.CultureInfo]::InvariantCulture, [ref]$_cvtFailOver)) { [Console]::Out.WriteLine('❌ 参数错误：超出 Int64 范围（对齐 py _i64）'); exit 1 }  # TryParse 收敛：裸 [long] cast 在 EAP Stop 前是非终止错误、变量落 $null fail-open（纯十进制超界静默放行分叉）
+$FailOver = $_cvtFailOver
 
 $ErrorActionPreference = 'Stop'
 try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catch {}
@@ -31,7 +33,7 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 function Load-Lexicon([string[]]$paths) {
     $seen = @{}; $out = @()
     foreach ($p in $paths) {
-        if ([string]::IsNullOrWhiteSpace($p) -or -not (Test-Path -LiteralPath $p)) { continue }
+        if ([string]::IsNullOrWhiteSpace($p) -or -not (Test-Path -LiteralPath $p -PathType Leaf)) { continue }  # -PathType Leaf 对齐 py isfile（目录须跳过，ReadAllLines 目录裸崩）
         foreach ($line in [System.IO.File]::ReadAllLines($p, [System.Text.Encoding]::UTF8)) {
             $s = $line.Trim($wsChars)
             if ($s -ne '' -and -not $s.StartsWith('#') -and -not $seen.ContainsKey($s)) {

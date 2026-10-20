@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# 已知口径：PS5.1（.NET Framework）对个别非法 UTF-8 序列替换粒度少 1 个 U+FFFD → units 展示可差 1（同 text_guard.py digest_of 注）
 # -*- coding: utf-8 -*-
 """detect_ai_text.py —— AI 文本启发式检测（本地辅助，P1-8）。
 

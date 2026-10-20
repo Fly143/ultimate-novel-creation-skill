@@ -40,9 +40,23 @@ $wsChars = [char[]]@(0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x1c, 0x1d, 0x1e, 0x1f, 0x20,
 if ($Chapter -notmatch '^-?[0-9]+$') { [Console]::Out.WriteLine('❌ 参数错误：章节号须为纯 ASCII 十进制整数（对齐 py _i64）'); exit 1 }
 $ChapterRaw = $Chapter  # param([string]) 类型约束会把赋值回炉成 String，先存原值再解约束重赋
 Remove-Variable -Name Chapter -Force -ErrorAction SilentlyContinue
-$Chapter = [long]$ChapterRaw
+$_cvtChapter = 0L
+if (-not [long]::TryParse($ChapterRaw, [Globalization.NumberStyles]::Integer, [Globalization.CultureInfo]::InvariantCulture, [ref]$_cvtChapter)) { [Console]::Out.WriteLine('❌ 参数错误：超出 Int64 范围（对齐 py _i64）'); exit 1 }  # TryParse 收敛：裸 [long] cast 在 EAP Stop 前是非终止错误、变量落 $null fail-open（纯十进制超界静默放行分叉）
+$Chapter = $_cvtChapter
 
 $ErrorActionPreference = 'Stop'
+
+function Sort-OrdinalPaths {
+    # 对齐 py sorted(Path)：Windows 下 py 走 normcase（小写化）+ 码点序。
+    # Sort-Object Name 走当前 culture（zh-CN 拼音序会与 py 反向）；
+    # 用 Sort(keys, items, Ordinal) 双数组形态（键=小写=py normcase 口径）；不走 Sort-Object Name（culture 拼音序会与 py 反向）。
+    param($Items)
+    $arr = [string[]]@($Items | Where-Object { $null -ne $_ -and [string]$_ -ne '' })
+    if ($arr.Count -le 1) { return ,$arr }
+    $keys = [string[]]@($arr | ForEach-Object { $_.ToLowerInvariant() })
+    [Array]::Sort($keys, $arr, [System.StringComparer]::Ordinal)
+    return ,$arr
+}
 
 function Test-MarkerState {
     param([string]$Path)
@@ -293,9 +307,9 @@ function Find-BodyFile {
     $bodyDir = Join-Path $ProjectRoot '正文'
     if (-not (Test-Path -LiteralPath $bodyDir)) { return $null }
     function Guard-DirCandidate([object[]]$Dirs) {
-        # 目录冒充正文 → 双引擎同文案 rc1（对齐 py find_body _guard_dir / ps1:30 放行纪律）
+        # 目录冒充正文 → 双引擎同文案 rc1（对齐 py find_body _guard_dir 与本文件 fail-closed 头注放行纪律）
         if ($Dirs.Count -gt 0) {
-            [Console]::Out.WriteLine(('❌ 正文交叉校验：正文候选路径是目录（应为 .txt 文件）：{0}' -f $Dirs[0].FullName))
+            [Console]::Out.WriteLine(('❌ 正文交叉校验：正文候选路径是目录（应为 .txt 文件）：{0}' -f [string]$Dirs[0]))
             exit 1
         }
     }
@@ -308,23 +322,23 @@ function Find-BodyFile {
         if ($dirRel -ne '') {
             $absDir = Join-Path $ProjectRoot ($dirRel -replace '/', [string][char]92)
             if (Test-Path -LiteralPath $absDir) {
-                $gd1 = @(Get-ChildItem -LiteralPath $absDir -Filter $filePat -Directory -ErrorAction SilentlyContinue | Sort-Object Name)
+                $gd1 = Sort-OrdinalPaths @(Get-ChildItem -LiteralPath $absDir -Filter $filePat -Directory -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
                 Guard-DirCandidate $gd1
-                $m = @(Get-ChildItem -LiteralPath $absDir -Filter $filePat -File -ErrorAction SilentlyContinue | Sort-Object Name)
-                if ($m.Count -gt 0) { return $m[0].FullName }
+                $m = Sort-OrdinalPaths @(Get-ChildItem -LiteralPath $absDir -Filter $filePat -File -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
+                if ($m.Count -gt 0) { return [string]$m[0] }
             }
         }
-        $gd2 = @(Get-ChildItem -LiteralPath $bodyDir -Filter $filePat -Directory -ErrorAction SilentlyContinue | Sort-Object Name)
+        $gd2 = Sort-OrdinalPaths @(Get-ChildItem -LiteralPath $bodyDir -Filter $filePat -Directory -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
         Guard-DirCandidate $gd2
-        $m2 = @(Get-ChildItem -LiteralPath $bodyDir -Filter $filePat -File -ErrorAction SilentlyContinue | Sort-Object Name)
-        if ($m2.Count -gt 0) { return $m2[0].FullName }
+        $m2 = Sort-OrdinalPaths @(Get-ChildItem -LiteralPath $bodyDir -Filter $filePat -File -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
+        if ($m2.Count -gt 0) { return [string]$m2[0] }
     }
     # 兜底：前缀匹配（与 py find_body 一致）
     foreach ($prefix in @(('第{0}章' -f $Nnn), ('第{0}章' -f $Ch))) {
-        $gd3 = @(Get-ChildItem -LiteralPath $bodyDir -Filter ($prefix + '*.txt') -Directory -ErrorAction SilentlyContinue | Sort-Object Name)
+        $gd3 = Sort-OrdinalPaths @(Get-ChildItem -LiteralPath $bodyDir -Filter ($prefix + '*.txt') -Directory -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
         Guard-DirCandidate $gd3
-        $matches = @(Get-ChildItem -LiteralPath $bodyDir -Filter ($prefix + '*.txt') -File -ErrorAction SilentlyContinue | Sort-Object Name)
-        if ($matches.Count -gt 0) { return $matches[0].FullName }
+        $matches = Sort-OrdinalPaths @(Get-ChildItem -LiteralPath $bodyDir -Filter ($prefix + '*.txt') -File -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
+        if ($matches.Count -gt 0) { return [string]$matches[0] }
     }
     return $null
 }

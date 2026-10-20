@@ -95,12 +95,14 @@ if ($null -ne $rules.files -and $rules.files -is [array]) {
     }
 }
 if ($null -ne $rules.paths -and $rules.paths -is [array]) {
+    $seenLbl = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::Ordinal)
     for ($i = 0; $i -lt $rules.paths.Count; $i++) {
         $item = $rules.paths[$i]
         if ($null -eq $item -or $item -isnot [pscustomobject] -or $null -eq $item.PSObject.Properties['label'] -or $null -eq $item.PSObject.Properties['files']) {
-            $schemaErrs += ("paths[{0}] 须为含 label/files 的对象" -f $i)
+            $schemaErrs += "paths[{0}] 须为含 label/files 的对象" -f $i
             continue
         }
+        if (-not $seenLbl.Add([string]$item.label)) { $schemaErrs += ("paths[{0}] label 重复：{1}（重复行会静默双计/歧义豁免）" -f $i, $item.label) }  # label 唯一性 fail-closed 对齐 py（原重复不校验）
         foreach ($key in @('files', 'branches', 'stacking')) {
             $prop = $item.PSObject.Properties[$key]
             if ($null -eq $prop) { continue }
@@ -123,8 +125,8 @@ $limVal = $null
 if ($null -ne $rules.path_ceiling -and $rules.path_ceiling -is [pscustomobject] -and $null -ne $rules.path_ceiling.PSObject.Properties['limit']) {
     $limVal = $rules.path_ceiling.limit
 }
-if ($limVal -isnot [int] -and $limVal -isnot [long]) { $schemaErrs += 'path_ceiling.limit 须为非负整数' }
-elseif ([long]$limVal -lt 0) { $schemaErrs += 'path_ceiling.limit 须为非负整数' }
+if ($limVal -isnot [int] -and $limVal -isnot [long]) { $schemaErrs += 'path_ceiling.limit 须为正整数（0 会使路径上限闸短路 fail-open）' }
+elseif ([long]$limVal -le 0) { $schemaErrs += 'path_ceiling.limit 须为正整数（0 会使路径上限闸短路 fail-open）' }
 if ($schemaErrs.Count -gt 0) {
     Write-Output ("❌ 规则单源校验失败：{0}（{1}）" -f $budgetPath, ($schemaErrs -join '；'))
     exit 1
@@ -235,12 +237,14 @@ if ($null -ne $rules.context_layers) {
     foreach ($p in $rules.context_layers.PSObject.Properties) { if ($p.Name -ne 'why') { $validLayers += [string]$p.Name } }
 }
 if ($validLayers.Count -eq 0) { $validLayers = @('protected', 'compressible') }
-$layerCounts = [ordered]@{}
-foreach ($k in $validLayers) { $layerCounts[$k] = 0 }
+$layerKeys = [string[]]@($validLayers)  # Ordinal 成员判定对齐 py dict 键大小写敏感（@{} 字面量默认不敏感 → 非法 layer 放行 fail-open）
+$layerValid = New-Object 'System.Collections.Generic.Dictionary[string,int]' ([System.StringComparer]::Ordinal)
+foreach ($k in $layerKeys) { $layerValid[$k] = 0 }
+$layerCounts = $layerValid
 foreach ($item in @($rules.files)) {
     $layer = ''
     if ($null -ne $item.PSObject.Properties['layer']) { $layer = [string]$item.layer }
-    if ($layerCounts.Contains($layer)) { $layerCounts[$layer]++ }
+    if ($layerValid.ContainsKey($layer)) { $layerCounts[$layer]++ }
     else { $script:errors += ("分层缺失/非法：{0} layer={1}" -f $item.path, $layer) }
 }
 $pathTotals = @{}
@@ -302,12 +306,14 @@ foreach ($path in @($rules.paths)) {
     # base 问题在分支/叠加之后登记（与 py errors 追加顺序逐条一致）
     $script:errors += @($sum.Problems | ForEach-Object { ("{0}：{1}" -f $label, $_) })
     $flag = '✅'
-    if ($exempt -contains $label) { $flag = '⚪ exempt' }
+    $isExempt = $false
+    foreach ($ex in @($exempt)) { if ([string]::Equals([string]$ex, $label, [System.StringComparison]::Ordinal)) { $isExempt = $true; break } }  # Ordinal 对齐 py set 成员判定（-contains 大小写不敏感 → 错配免判上限 fail-open）
+    if ($isExempt) { $flag = '⚪ exempt' }
     elseif ($limit -gt 0 -and $total -gt $limit) {
         $script:errors += ("路径超上限：{0} {1:N0} > {2:N0}" -f $label, $total, $limit)
         $flag = '❌'
     }
-    if ($exempt -notcontains $label) {
+    if (-not $isExempt) {
         $pathTotals[$label] = $total
         if ($total -gt $worst) { $worst = $total; $worstLabel = $label }
     }
@@ -370,7 +376,7 @@ if ($null -eq $bl -or $bl -isnot [pscustomobject]) {
                 $script:errors += ("基线非法：baseline.max_single_file={0}（应为 path=整数）" -f $msfStr)
             } elseif (-not [long]::TryParse($snPart, [ref]$snVal)) {
                 $script:errors += ("基线非法：baseline.max_single_file={0}（应为 path=整数）" -f $msfStr)
-            } elseif (($msfStr.Substring(0, $eqIdx)) -ne [string]$maxSingleRef -or $snVal -ne [long]$maxSingleVal) {
+            } elseif (-not [string]::Equals($msfStr.Substring(0, $eqIdx), [string]$maxSingleRef, [System.StringComparison]::Ordinal) -or $snVal -ne [long]$maxSingleVal) {  # Ordinal 对齐 py 字符串 !=（-ne 大小写不敏感 → 防漂移闸失效）
                 $script:errors += ("基线过期：baseline.max_single_file={0} ≠ 实测 {1}={2:N0}（路径段须为实测最大单文件名；改文档后回填 doc-budget.json baseline）" -f $msfStr, $maxSingleRef, [long]$maxSingleVal)
             }
         }

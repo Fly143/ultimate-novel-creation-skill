@@ -79,10 +79,15 @@ def validate_rules(rules: dict) -> list[str]:
                 errs.append(f"files[{i}].budget 须为整数")
     paths = rules.get("paths")
     if isinstance(paths, list):
+        _seenLbl = set()
         for i, item in enumerate(paths):
             if not isinstance(item, dict) or "label" not in item or "files" not in item:
                 errs.append(f"paths[{i}] 须为含 label/files 的对象")
                 continue
+            if item["label"] in _seenLbl:
+                errs.append(f"paths[{i}] label 重复：{item['label']}（重复行会静默双计/歧义豁免）")  # label 唯一性 fail-closed（原重复不校验，同路径重复打印一行）
+                continue
+            _seenLbl.add(item["label"])
             for key in ("files", "branches", "stacking"):
                 if key not in item:
                     continue
@@ -111,8 +116,8 @@ def validate_rules(rules: dict) -> list[str]:
     ):
         errs.append("exempt 须为字符串或字符串数组")
     lim = ceiling.get("limit")
-    if not _in_i64(lim) or lim < 0:
-        errs.append("path_ceiling.limit 须为非负整数")
+    if not _in_i64(lim) or lim <= 0:
+        errs.append("path_ceiling.limit 须为正整数（0 会使路径上限闸短路 fail-open）")
     return errs
 
 

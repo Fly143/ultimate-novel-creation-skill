@@ -50,8 +50,8 @@ ls modules modules/02_功能模块索引.md scripts/ .github/scripts/
 
 ```bash
 # 1) 现有门禁是否全绿（确认起点干净）
-python .github/scripts/test-check-done.py                # 期望全绿（2026-10-19 终态 410 项 = py/ps1 双引擎；无 pwsh 时 ps1 引擎由系统 PowerShell 5.1 承担——探测顺序 pwsh→powershell，仅当机器完全无 PowerShell 时才单跑 py）
-pwsh .github/scripts/audit.ps1 -Root . -StrictOrphan -LintTerm -LintLineRef -LintBudget   # -LintOrder 默认 $true，禁裸传；-File 形态勿传 $false（需关用 -Command）
+python .github/scripts/test-check-done.py                # 期望全绿（2026-10-20 终态 469 项 = py/ps1 双引擎；无 pwsh 时 ps1 引擎由系统 PowerShell 5.1 承担——探测顺序 pwsh→powershell，仅当机器完全无 PowerShell 时才单跑 py）
+pwsh .github/scripts/audit.ps1 -Root . -StrictOrphan -LintTerm -LintLineRef -LintBudget   # -LintOrder 默认 $true，禁裸传；-File 形态勿传 $false（PS5.1 -File 绑定失败；仅 pwsh7 -File 冒号形态 `-LintOrder:$false` 可用、空格形态亦 rc1；需关一律用 -Command 形态）
 
 # 2) 记录现状指标（P0-4 需要基线数据）
 python - <<'PY'

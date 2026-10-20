@@ -54,8 +54,13 @@ def day_of(ch: int) -> str:
 
 
 def digits(s: str):
-    m = re.search(r"(\d+)", s)
-    return int(m.group(1)) if m else None
+    m = re.search(r"([0-9]+)", s)  # ASCII 数字收口：\d 认 Unicode 数字族（١٢）、ps1 TryParse 拒 → 分叉
+    if not m:
+        return None
+    if int(m.group(1)) > 9223372036854775807:
+        print(f"❌ 章号超出日期换算上界：{m.group(1)}（≤2913088 才能映射到 9999 年内）")  # 上界守卫对齐 ps1 Get-Digits TryParse rc1（dropped/paused 行不触 day_of 致 rc0 分叉）
+        sys.exit(1)
+    return int(m.group(1))
 
 
 def detect_current(project: str) -> int:
@@ -63,14 +68,24 @@ def detect_current(project: str) -> int:
     body = os.path.join(project, "正文")
     if os.path.isdir(body):
         for f in os.listdir(body):
-            m = re.match(r"第(\d+)章", f)
+            m = re.match(r"第([0-9]+)章", f)  # ASCII 收口对齐 ps1 ^第([0-9]+)章（\d 认 Unicode 数字族分叉）
             if m:
+                if int(m.group(1)) > 9223372036854775807:
+                    print(f"❌ 章号超出日期换算上界：{m.group(1)}（≤2913088 才能映射到 9999 年内）")  # 超 Int64 同文案守卫对齐 ps1 TryParse（ps1 rc1、py 原无守卫 rc0 为分叉）
+                    sys.exit(1)
                 best = max(best, int(m.group(1)))
     st = os.path.join(project, "记忆系统", "_state.json")
     if best == 0 and os.path.exists(st):
         try:
             with open(st, encoding="utf-8-sig") as f:
-                best = int(json.load(f).get("last_committed_chapter", 0) or 0)
+                _lc = json.load(f).get("last_committed_chapter", 0) or 0
+            if isinstance(_lc, str):
+                if not (_lc.isascii() and _lc.strip().isdecimal()):
+                    raise ValueError  # 拒 Unicode 数字/下划线串（int 认 1_0、ps1 invariant Parse 拒 → 回退口径分叉）
+                _lc = _lc.strip()
+            best = int(_lc)
+            if best > 9223372036854775807 or best < 0:
+                raise ValueError  # 超 Int64/负数回退 0 对齐 ps1 [long] 溢出 catch（py 原无上界撞 day_of rc1 分叉）
         except Exception:
             best = 0
     return best
@@ -98,7 +113,12 @@ def from_state(state) -> list[dict]:
     if fs is not None and not isinstance(fs, dict):
         print("❌ foreshadow 须为对象（先 state_commit check 修复状态单）")
         sys.exit(1)
+    _seenF = set()
     for fid, v in (fs or {}).items():
+        if fid.lower() in _seenF:
+            print("❌ 记忆系统/_state.json JSON 损坏（先 state_commit check 修复状态单）")  # 大小写撞键：pwsh7 ConvertFrom-Json 拒读 rc1，py 原放行 rc0 为分叉 → 同拒同文案
+            sys.exit(1)
+        _seenF.add(fid.lower())
         if not isinstance(v, dict):
             print(f"❌ foreshadow.{fid} 须为对象（先 state_commit check 修复状态单）")
             sys.exit(1)
@@ -108,17 +128,44 @@ def from_state(state) -> list[dict]:
                 return 0
             if isinstance(x, bool):
                 raise ValueError("bool 不是章号")
+            _orig = x  # 报错渲染用原值（strip 后 repr 会把 ' ' 报成 '' 与 ps1 原值口径分叉）
             try:
-                return max(0, int(float(x)))
-            except (TypeError, ValueError):
-                raise ValueError(f"章号不是数值：{x!r}")
-        _rs_n = _numch(v.get("resolved_ch"))
+                if isinstance(x, str):
+                    if not x.isascii():
+                        raise ValueError  # Unicode 数字族（١٢/²）float() 认、ps1 双引擎拒 → 须同拒
+                    if "_" in x.strip():
+                        raise ValueError  # 下划线数字串（1_000）float/int 认、ps1 invariant TryParse 拒 → 须同拒（R41 hex 同族残留）
+                f = float(x)
+                if f != f or f in (float("inf"), float("-inf")):
+                    raise ValueError  # inf/nan：int(float('1e400')) 抛 OverflowError 裸崩 → 收敛中文；文案归一 ps1 Infinity/NaN
+                n = int(f)
+                if n > 9223372036854775807 or n < -9223372036854775808:
+                    raise ValueError  # 超 Int64 上下界拒对齐 ps1 [long] 溢出（负超界 py 原 max(0,n) 放行 rc0 分叉）
+                return max(0, n)
+            except (TypeError, ValueError, OverflowError):
+                import json as _json
+                if isinstance(_orig, float):
+                    if _orig != _orig:
+                        _repr = "NaN"
+                    elif _orig in (float("inf"), float("-inf")):
+                        _repr = "Infinity" if _orig > 0 else "-Infinity"
+                    else:
+                        _repr = f"{_orig:.15g}".upper().replace("E", "E")  # G 口径大写 E 对齐 ps1 [string]（repr 1e+19 vs 1E+19 大小写分叉）
+                elif isinstance(_orig, (str, list, dict)):
+                    _repr = _json.dumps(_orig, ensure_ascii=False, separators=(",", ":"))  # JSON 渲染对齐 ps1 ConvertTo-Json -Compress（无空格分隔符；str repr 单引号/裸换行分叉）
+                else:
+                    _repr = repr(_orig)
+                raise ValueError(f"章号不是数值：{_repr}")
         try:
+            # 求值序 planted→planned→resolved 对齐 ps1（原 resolved 先求 → 复合非法时首错字段归因分叉）
+            _pl_n = _numch(v.get("planted_ch", 0))
+            _planned_n = _numch(v.get("planned_resolve_ch", 0))
+            _rs_n = _numch(v.get("resolved_ch"))
             items.append({
                 "id": fid,
-                "name": str(v.get("desc") or ""),  # 显式 null 与 ps1 [string]$null 渲染同为空串
-                "planted": _numch(v.get("planted_ch", 0)),
-                "planned": _numch(v.get("planned_resolve_ch", 0)),
+                "name": v.get("desc") if isinstance(v.get("desc"), str) else "",  # 非字符串 desc 按空串对齐 ps1（py str() 渲染 [1, 2] vs ps1 "1 2" 分叉）
+                "planted": _pl_n,
+                "planned": _planned_n,
                 "resolved": _rs_n,
                 "status": "resolved" if _rs_n > 0 else "open",
             })
@@ -183,7 +230,7 @@ def from_checklist(path: str) -> list[dict]:
         if planted == 0:
             continue
         raw_id = g("id")
-        fid = raw_id if raw_id and not raw_id.isdigit() else f"#{raw_id}" if raw_id else f"F{seq:03d}"
+        fid = raw_id if raw_id and not (raw_id.isdigit() and raw_id.isascii()) else f"#{raw_id}" if raw_id else f"F{seq:03d}"  # isascii 对齐 ps1 ^[0-9]+$（² 是 No 族 isdigit=True/.NET \d 拒；١٢ 是 Nd 族两边 isdigit/\d 均认，须 ASCII 才一致）
         st = g("status")
         status = "resolved" if "已回收" in st else "dropped" if "废弃" in st else \
             "paused" if "暂停" in st else "near" if "准备回收" in st else "open"

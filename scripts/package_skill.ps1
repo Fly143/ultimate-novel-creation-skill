@@ -27,7 +27,7 @@ $text = [System.IO.File]::ReadAllText($skillPath, [System.Text.Encoding]::UTF8)
 $fm = New-Object 'System.Collections.Generic.Dictionary[string,string]' ([System.StringComparer]::Ordinal)
 if ($text.StartsWith('---')) {
     $end = $text.IndexOf("`n---", 3, [System.StringComparison]::Ordinal)
-    if ($end -gt 0) {
+    if ($end -gt 3) {  # $end=3 即空 frontmatter（---\n---）→ $end-4=-1 裸崩，跳过解析对齐 py text[4:3]='' 返回 {}
         foreach ($line in ($text.Substring(4, $end - 4) -split '\r\n|\r|\v|\f|[\x1c-\x1e]|\x85|\u2028|\u2029|\n')) {
             if ($line -match ':' -and $line -notmatch '^[ \t]') {  # 与 py frontmatter 同口径（仅排空格/Tab 首行，NBSP 等不排）
                 $i = $line.IndexOf(':')
@@ -45,10 +45,11 @@ foreach ($f in $includeFiles) { if (Test-Path -LiteralPath (Join-Path $Root $f))
 foreach ($d in $includeDirs) {
     $base = Join-Path $Root $d
     if (-not (Test-Path -LiteralPath $base)) { continue }
-    $rootFull = (Resolve-Path -LiteralPath $Root).Path
-    foreach ($p in Get-ChildItem -Recurse -File -Path $base) {
+    $rootFull = (Get-Item -LiteralPath $Root).FullName  # Resolve-Path 不展开 8.3 短名，Get-ChildItem FullName 是长名 → Substring 错位（对齐 state_commit Get-RelPath 前缀归一）
+    foreach ($p in Get-ChildItem -Recurse -File -LiteralPath $base) {  # -Path 会把含 [] 的合法 Root 当通配符 → 静默少算载荷
         # 与 py collect 同排除：__pycache__/*.pyc 不进载荷（读数随本机状态漂移）
-        if ($p.FullName -match '__pycache__' -or $p.Extension -eq '.pyc' -or $p.Extension -eq '.pyo') { continue }
+        $parts = $p.FullName -split '\\|/'
+        if ($parts -contains '__pycache__' -or $p.Extension -eq '.pyc' -or $p.Extension -eq '.pyo') { continue }  # 整段匹配对齐 py in p.parts（子串匹配 __pycache__x 会误排）
         [void]$rels.Add($p.FullName.Substring($rootFull.Length).TrimStart('\', '/').Replace('\', '/'))
     }
 }

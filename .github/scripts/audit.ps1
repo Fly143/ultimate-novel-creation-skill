@@ -33,11 +33,11 @@ if (-not (Test-Path -LiteralPath $Root -PathType Container)) {
     Write-Output ("❌ Root 目录不存在：{0}" -f $Root)
     exit 1
 }
-$Root = (Resolve-Path -LiteralPath $Root).Path.TrimEnd('\','/')
+$Root = (Get-Item -LiteralPath $Root).FullName.TrimEnd('\','/')  # Resolve-Path 不展开 8.3 短名 → 8 处 Substring($Root.Length+1) 错位致死引用误报（对齐 package_skill/state_commit 同型修复）
 
 # ---------- ① 死引用审计 ----------
 
-$files = Get-ChildItem -Recurse -File $Root -Filter *.md | ForEach-Object { $_.FullName.Substring($Root.Length+1) -replace '\\','/' }
+$files = Get-ChildItem -Recurse -File -LiteralPath $Root -Filter *.md | ForEach-Object { $_.FullName.Substring($Root.Length+1) -replace '\\','/' }
 $fileSet = @{}; foreach($f in $files){ $fileSet[$f] = $true }
 $dirSet = @{}
 foreach($f in $files){ $p = Split-Path $f -Parent; while($p -and $p -ne ''){ $dirSet[($p -replace '\\','/')]=$true; $p = Split-Path $p -Parent } }
@@ -75,7 +75,7 @@ function Test-Cand([string]$cand, [string]$srcDir, [string]$label, [string]$line
   }
   $broken["$srcDir|$label|$c"] = $true
 }
-Get-ChildItem -Recurse -File $Root -Filter *.md | ForEach-Object {
+Get-ChildItem -Recurse -File -LiteralPath $Root -Filter *.md | ForEach-Object {
   $rel = $_.FullName.Substring($Root.Length+1) -replace '\\','/'
   if($rel -like '.github/*'){ return }   # 方案/计划文档引用外部仓证据路径，不做死引用判定
   $parts = $rel -split '/'
@@ -100,7 +100,7 @@ if($genuine.Count){
 # ---------- ② 孤儿文件 ----------
 
 $allText = @{}
-Get-ChildItem -Recurse -File $Root -Filter *.md | ForEach-Object {
+Get-ChildItem -Recurse -File -LiteralPath $Root -Filter *.md | ForEach-Object {
   $rel = $_.FullName.Substring($Root.Length+1) -replace '\\','/'
   $allText[$rel] = [System.IO.File]::ReadAllText($_.FullName, $enc)
 }
@@ -111,7 +111,7 @@ if($StrictOrphan){
   $orphans = @()
   $docRoots = @('README.md','LICENSE','.gitignore','SKILL.md','system_prompt.md')
   # 可解析资产清单（排除 .git）
-  $allFiles = Get-ChildItem -Recurse -File $Root | ForEach-Object { $_.FullName.Substring($Root.Length+1) -replace '\\','/' }
+  $allFiles = Get-ChildItem -Recurse -File -LiteralPath $Root | ForEach-Object { $_.FullName.Substring($Root.Length+1) -replace '\\','/' }
   $assetSet = @{}; foreach($a in $allFiles){ if(($a -notlike '.git/*') -and ($a -notlike '.github/plans/*') -and ($a -notlike '.agents/*')){ $assetSet[$a] = $true } }   # ADR/计划为过程记录，不按 skill 资产判孤儿
   # 引用前缀目录白名单（与 skill 资产目录一致）
   $strictDirs = @('modules','references','templates','memory-system','agents','scripts','templates/constraints','references/rulesets')
@@ -175,7 +175,7 @@ elseif($skillVer -ne $readmeVer){ $errors += "版本号不一致：SKILL.md=$ski
 
 $forbidden = @('记忆系统/bible','记忆系统/summaries','记忆系统/phases','记忆系统/volumes','记忆系统/constraints','记忆系统/bible/')
 $tokens = @()
-Get-ChildItem -Recurse -File $Root -Filter *.md | ForEach-Object {
+Get-ChildItem -Recurse -File -LiteralPath $Root -Filter *.md | ForEach-Object {
   $rel = $_.FullName.Substring($Root.Length+1) -replace '\\','/'
   if($rel -like '.github/*'){ return }   # 方案文档引用外部仓原文路径，不判残留
   $lines = [System.IO.File]::ReadAllLines($_.FullName, $enc)
@@ -194,7 +194,7 @@ if($LintTerm){
   # 排除：代码围栏内内容、.done 标记名（受文件系统约束不可改，且已不在检查词表内）
   $termRe = '(?<![A-Za-z_/-])(volume|phase|stage|summaries)(?![A-Za-z_])'
   $termHits = @()
-  Get-ChildItem -Recurse -File $Root -Filter *.md | ForEach-Object {
+  Get-ChildItem -Recurse -File -LiteralPath $Root -Filter *.md | ForEach-Object {
     $rel = $_.FullName.Substring($Root.Length+1) -replace '\\','/'
     if($rel -like '.github/*'){ return }
     $lines = [System.IO.File]::ReadAllLines($_.FullName, $enc)
@@ -219,7 +219,7 @@ if($LintTerm){
 if($LintLineRef){
   # 用「第 N 行」定位文档内容极易因增删行而失准（CI 无法发现）。改用节名/标题引用。
   $lineHits = @()
-  Get-ChildItem -Recurse -File $Root -Filter *.md | ForEach-Object {
+  Get-ChildItem -Recurse -File -LiteralPath $Root -Filter *.md | ForEach-Object {
     $rel = $_.FullName.Substring($Root.Length+1) -replace '\\','/'
     if($rel -like '.github/*'){ return }
     $lines = [System.IO.File]::ReadAllLines($_.FullName, $enc)
@@ -270,7 +270,7 @@ if($LintOrder){
   $wrongOrderRe = '(先修复再朱雀|先修复后朱雀|先修复，后朱雀|修复后(再)?朱雀|修复完成后(再)?(执行|跑)?朱雀|先跑修复、后跑朱雀|修复\s*→\s*朱雀|修复\s*→\s*\.done_zhuque|修复后再(跑)?朱雀|修复，再(跑)?朱雀)'
   $allowRe = '(禁止|不得|禁写|勿写|错误顺序|互斥|不要写成|不要写|禁止写成|不得写成|禁止把|不得把|严禁|非必做|非强制|勿)'
   $orderHits = @()
-  Get-ChildItem -Recurse -File $Root -Filter *.md | ForEach-Object {
+  Get-ChildItem -Recurse -File -LiteralPath $Root -Filter *.md | ForEach-Object {
     $rel = $_.FullName.Substring($Root.Length+1) -replace '\\','/'
     if($rel -like '.github/*'){ return }
     $lines = [System.IO.File]::ReadAllLines($_.FullName, $enc)

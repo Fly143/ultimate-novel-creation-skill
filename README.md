@@ -279,12 +279,14 @@ v9.6.0 写后流水线要点：
 ## 项目结构（本技能仓库）
 
 ```
+├── LICENSE / NOTICE       # MIT 许可 + OpenFic Apache-2.0 出处署名（NOTICE 随载荷入包）
+├── .github/specs/        # 管线门禁规格（zhuque-human-and-pipeline-gates.md，随 .github 仅开发侧）
 ├── SKILL.md              # 技能入口 + 路径约定
 ├── system_prompt.md      # 宿主 system prompt（强制 agent 遵守流程，使用前必配）
 ├── modules/              # 33 个模块文件（28 功能模块 + 2 拆分执行规格 03_26B/C + 3 核心协议/规范 00/01/02）
 ├── references/           # 14+3 个精选写作参考（含 rulesets/ 规则集子目录）
 ├── templates/            # 19+3 个输出模板（含 constraints/ 约束模板子目录；含章节任务书模板）
-├── scripts/              # 指纹（py/pwsh 同口径；perl 为降级路径近似口径——均值舍入与段落切分集合略宽）/ 词频统计（wordfreq.byte.pl 单实现，无 perl 时主观目测降级）/ 伏笔时间线（foreshadow_timeline py/ps1 双实现）+ 章节 .done 客观核验（check-done.py/ps1）+ 状态单真源（state_commit.py/ps1 + state_render.py）+ AI 味启发式检测（detect_ai_text.py/ps1 + ai-tells.txt）+ 正文指纹/手改保护（text_guard.py/ps1）+ 发布包打包校验（package_skill.py/ps1）+ 热路径文档预算守卫（doc-budget.json + check-doc-budget.py/ps1）+ 旧项目路径迁移（migrate_memory_paths.ps1 单实现，随 release Assets 分发）
+├── scripts/              # 指纹（py/pwsh 同口径；perl 为降级路径近似口径——均值舍入（半入 vs 银行家舍入）、段落仅按换行切（`\v`/`\f`/裸 `\r` 不切，段落偏宽）、字数长度口径（非 BMP 字符按码点计而非 UTF-16 码元））/ 词频统计（wordfreq.byte.pl 单实现，无 perl 时主观目测降级）/ 伏笔时间线（foreshadow_timeline py/ps1 双实现）+ 章节 .done 客观核验（check-done.py/ps1）+ 状态单真源（state_commit.py/ps1 + state_render.py）+ AI 味启发式检测（detect_ai_text.py/ps1 + ai-tells.txt）+ 正文指纹/手改保护（text_guard.py/ps1）+ 发布包打包校验（package_skill.py/ps1）+ 热路径文档预算守卫（doc-budget.json + check-doc-budget.py/ps1）+ 旧项目路径迁移（migrate_memory_paths.ps1 单实现，随 release Assets 分发）
 ├── .github/              # 维护者工具：workflows/audit.yml + scripts/audit.ps1 + SMOKE_TEST.md + specs/（开发规格，不进 skill 运行时）
 └── memory-system/        # 记忆系统模板（skill 内只读，中英对照见 SKILL.md）
     ├── bible/            # 故事圣经 → 故事圣经/人物弧线/剧情时间线/伏笔清单/角色数据库

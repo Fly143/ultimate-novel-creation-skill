@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# 已知口径：PS5.1（.NET Framework）对个别非法 UTF-8 序列替换粒度少 1 个 U+FFFD → units 展示可差 1；sha256 字节级不受影响（同 text_guard.py digest_of 注）
 # -*- coding: utf-8 -*-
 """
 全能小说作家 - 正文分布统计脚本（python 版，与 fingerprint.pl / fingerprint.ps1 同口径）

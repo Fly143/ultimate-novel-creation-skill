@@ -3788,11 +3788,12 @@ def _run(results: list[bool]) -> int:
         else:
             _c47o = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(ROOT / "scripts" / "check-done.ps1"), "-Project", str(_p47o), "-Chapter", "1", "-SoftReport"]
         _pr47o = subprocess.run(_c47o, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
-        _hit47 = tuple(l for l in _decode(_pr47o.stdout).splitlines() if "爱意" in l or "中夜" in l)[:1]
-        _rr47o[_e47o] = (_pr47o.returncode, _hit47)
+        # 只取行尾文件名比对：CI TEMP 含 RUNNER~1 短名等路径形态差异（py 保留 vs ps1 .NET 展开）会致整行不等——比文件名即验「选同文件」语义
+        _fn47 = [m.group(0) for l in _decode(_pr47o.stdout).splitlines() for m in [re.search(r"第001章_(?:爱意|中夜)\.txt", l)] if m]
+        _rr47o[_e47o] = (_pr47o.returncode, tuple(_fn47)[:1])
     _ze47 = _rr47o["py"][1][0] if _rr47o["py"][1] else ""
     results.append(case("[三十六轮] 正文多候选 normcase 序（爱意/中夜）→ 双引擎交叉校验行同名（culture 拼音序不再反向）", True,
-                        len(set(_rr47o.values())) == 1 and bool(_ze47) and ("爱意" in _ze47 or "中夜" in _ze47)))
+                        len(set(_rr47o.values())) == 1 and bool(_ze47) and _ze47 == "第001章_中夜.txt"))
 
 
     # === 三十七轮修复回归组（通配路径静默少算 / 文本守卫跨引擎互判） ===

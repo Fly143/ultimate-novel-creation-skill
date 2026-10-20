@@ -324,28 +324,6 @@ v9.6.0 写后流水线要点：
 
 在第三方软件（Claude Code / Cursor / API 接入 / Dify·Coze 等）中使用时，可将 `system_prompt.md` 配置为该软件的 system prompt，确保宿主 agent 严格按技能执行、不自由发挥。
 
-## 旧项目迁移（v9.4.0 之前）
-
-9.4.0 起记忆系统产出路径中文化（bible→圣经、summaries→摘要、phases→阶段、volumes→卷、constraints→约束）。9.4.0 之前创建的项目需迁移，否则跨会话恢复找不到项目：
-
-```powershell
-# 在项目目录（含 [书名]/ 的上级目录）运行
-powershell -ExecutionPolicy Bypass -File scripts/migrate_memory_paths.ps1          # 预览
-powershell -ExecutionPolicy Bypass -File scripts/migrate_memory_paths.ps1 -Apply   # 执行
-```
-
-脚本已随各 release 附于 Assets（`migrate_memory_paths.ps1`）。
-
-## 旧项目兼容（v9.5.18 正文纯净化的影响）
-
-v9.5.18 起正文文件不再追加元数据块（章级档案改存 `报告/第NNN章_章节档案.md`）。**已有项目的旧章节无需改动**：
-
-- 旧章节正文末尾的 `----` 元数据块 + YAML 参数链**继续有效，无需迁移**（仍留在旧章节正文末尾；v9.5.18 起新写的章节改为写在 `报告/第NNN章_章节档案.md`）
-- 既有正文里的「完成步骤」字段已废除（完成状态一律以 `.done/` 空标记为准，见 03_26 第七节）；该字段可忽略，不影响任何流程
-- 相关工具保留旧口径兼容：`scripts/fingerprint.byte.pl` / `wordfreq.byte.pl` 的 `--stop-at-dashes` 旗标仍可用于旧章节（按 `----` 行截断剔除元数据）
-- 每 10/50 章参数链压缩：新章节读 `报告/第NNN章_章节档案.md`，旧章节仍需按 `----` 截断后从正文读取
-- 新旧章节可混存，互不影响；从新版起写的章节一律纯净
-
 ## 声明
 
 本技能所有内容均由 AI 生成，不含任何人工编写，望周知！

@@ -26,7 +26,9 @@ try { [System.Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($fa
 if ($Chapter -notmatch '^-?[0-9]+$') { [Console]::Out.WriteLine('❌ 参数错误：章节号须为纯 ASCII 十进制整数（对齐 py _i64）'); exit 1 }
 $ChapterRaw = $Chapter  # param([string]) 类型约束会把赋值回炉成 String，先存原值再解约束重赋
 Remove-Variable -Name Chapter -Force -ErrorAction SilentlyContinue
-$Chapter = [long]$ChapterRaw
+$_cvtChapter = 0L
+if (-not [long]::TryParse($ChapterRaw, [Globalization.NumberStyles]::Integer, [Globalization.CultureInfo]::InvariantCulture, [ref]$_cvtChapter)) { [Console]::Out.WriteLine('❌ 参数错误：超出 Int64 范围（对齐 py _i64）'); exit 1 }  # TryParse 收敛：裸 [long] cast 在 EAP Stop 前是非终止错误、变量落 $null fail-open（纯十进制超界静默放行分叉）
+$Chapter = $_cvtChapter
 
 $ErrorActionPreference = 'Stop'
 $enc = New-Object System.Text.UTF8Encoding($false)
@@ -788,8 +790,8 @@ else {
                 if ($sub -eq '圣经') {
                     $found = @($found | Where-Object { $archiveNames -contains [System.IO.Path]::GetFileName($_) })
                 } else {
-                    # 只归档可由 state.summaries 重建的 第NNN章摘要；模板.md 等非派生件留原位（与 py 同口径）
-                    $found = @($found | Where-Object { [System.IO.Path]::GetFileName($_) -match '^第(\d+)章摘要\.md$' })
+                    # 只归档可由 state.summaries 重建的 第NNN章摘要；模板.md 等非派生件留原位（与 py 同口径）；[0-9] 收口对齐 py（.NET \d 认 Unicode 数字族）
+                    $found = @($found | Where-Object { [System.IO.Path]::GetFileName($_) -match '^第([0-9]+)章摘要\.md$' })
                 }
                 $olds += Sort-Ordinal $found
             }

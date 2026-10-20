@@ -155,10 +155,15 @@ def validate_state(s: dict) -> list[str]:
     if fsv is not None and not isinstance(fsv, dict):
         errs.append("foreshadow 须为对象")
     elif isinstance(fsv, dict):
+        _seenFs = set()
         for _fsn, _fsv in fsv.items():
             if not _fsn:
                 errs.append("foreshadow 键名不能为空（空键 pwsh7 ConvertFrom-Json 拒读）")
                 break
+            if _fsn.lower() in _seenFs:
+                errs.append(f"foreshadow 键名大小写撞键：{_fsn}（pwsh7 ConvertFrom-Json 拒读同名大小写变体）")
+                break
+            _seenFs.add(_fsn.lower())
             if not isinstance(_fsv, dict):
                 errs.append(f"foreshadow.{_fsn} 须为对象")
                 break
@@ -587,7 +592,7 @@ def cmd_migrate(project: Path, apply: bool) -> int:
                 olds += sorted(p for p in d.glob("*.md") if p.name in archive_names)
             else:
                 # 只归档可由 state.summaries 重建的 第NNN章摘要；模板.md 等非派生件留原位
-                olds += sorted(p for p in d.glob("*.md") if re.fullmatch(r"第\d+章摘要\.md", p.name))
+                olds += sorted(p for p in d.glob("*.md") if re.fullmatch(r"第[0-9]+章摘要\.md", p.name))  # [0-9] 收口对齐 _existing_chapters（\d 认 Unicode 数字族）
     ctx = mem / "上下文.md"
     if ctx.is_file():
         olds.append(ctx)

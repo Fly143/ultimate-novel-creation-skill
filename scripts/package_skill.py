@@ -3,7 +3,7 @@
 """package_skill.py —— 技能发布包打包与校验（P3-19）。
 
 校验 SKILL.md frontmatter（name/description/version 必填）→ 收集运行时载荷
-（SKILL.md / system_prompt.md / LICENSE / modules / templates / references / scripts）
+载荷：SKILL.md / system_prompt.md / LICENSE / NOTICE / modules / templates / references / scripts（权威白名单见 INCLUDE_FILES / INCLUDE_DIRS）。
 → --check 只打印清单；默认再产出确定性 zip（固定时间戳+排序；同一 Python 解释器两次运行字节一致，跨解释器 zlib 差异可致字节不同，载荷计数不受影响）。
 排除：.git / .github / .agents / dist / 记忆系统模板 等过程资产。
 双实现口径：--check 清单输出与 package_skill.ps1 逐字节一致；zip 仅 py 产出（见实施记录偏离项）。
@@ -55,7 +55,7 @@ def collect(root: Path) -> list[str]:
         for p in sorted(base.rglob("*")):
             if not p.is_file():
                 continue
-            if "__pycache__" in p.parts or p.suffix in (".pyc", ".pyo"):
+            if "__pycache__" in {x.lower() for x in p.parts} or p.suffix.lower() in (".pyc", ".pyo"):  # 大小写不敏感对齐 ps1 -contains/-eq（.PYC/__PyCache__ 分叉）
                 continue  # 机器本地字节码不进载荷（否则读数随本机状态漂移、zip 带陈旧字节）
             rels.append(p.relative_to(root).as_posix())
     return sorted(set(rels))

@@ -144,7 +144,7 @@ def load_rules() -> dict:
     return rules
 
 
-# 惰性加载（对齐 ps1:65→70→78 顺序：项目目录 → .done → 规则单源；导入期不加载，复合故障首条归因与 ps1 一致）
+# 惰性加载（对齐 ps1 同序：项目目录 → .done → 规则单源；导入期不加载，复合故障首条归因与 ps1 一致）
 RULES: dict = {}
 BASE_MARKS: list[str] = []
 EVIDENCE_RULES: list[tuple[str, str, bool]] = []
@@ -293,7 +293,7 @@ def find_body(project: Path, nnn: str, chapter: int) -> Path | None:
     if not body_dir.is_dir():
         return None
     def _guard_dir(cands) -> Path | None:
-        # 目录冒充正文 → 双引擎同文案 rc1（对 ps1:30「目录当报告等场景不得 exit0 放行」纪律）
+        # 目录冒充正文 → 双引擎同文案 rc1（对 ps1 fail-closed 头注「目录当报告等场景不得 exit0 放行」纪律）
         for p in cands:
             if p.is_dir():
                 print(f"❌ 正文交叉校验：正文候选路径是目录（应为 .txt 文件）：{p}")
@@ -301,7 +301,7 @@ def find_body(project: Path, nnn: str, chapter: int) -> Path | None:
         return None
     for glob in BODY_GLOBS:
         pattern = glob.format(nnn=nnn, ch=chapter)
-        # 排序取首个：文件系统 glob 顺序不定，与 ps1 的 Sort-Object Name 对齐
+        # 排序取首个：文件系统 glob 顺序不定，与 ps1 Sort-OrdinalPaths（Ordinal 码点序）对齐（ps1 已弃 culture Sort-Object）
         _c1 = sorted(body_dir.parent.glob(pattern.replace("\\", "/")))
         _guard_dir(_c1)
         for p in _c1:

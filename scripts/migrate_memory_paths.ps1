@@ -20,6 +20,11 @@ param(
 try { [System.Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false) } catch { }  # 中文输出不乱码（对齐其余 ps1）
 $ErrorActionPreference = 'Stop'
 
+# Root 存在性 fail-fast（对齐 audit.ps1:31-35：不存在时 SilentlyContinue 吞错 → 误报「已迁移」fail-open rc0）
+if (-not (Test-Path -LiteralPath $TargetDir -PathType Container)) {
+    [Console]::Out.WriteLine(('❌ 目标目录不存在：{0}' -f $TargetDir)); exit 1
+}
+
 # ---- 目录映射（记忆系统/ 下）----
 $dirMap = @{
     'bible'       = '圣经'
@@ -43,7 +48,13 @@ $fileMap = @{
 }
 
 function Rename-Pattern([string]$dir, [string]$pattern, [scriptblock]$converter) {
-    Get-ChildItem -LiteralPath $dir -Filter $pattern -File -ErrorAction SilentlyContinue | ForEach-Object {
+    $enum = @(Get-ChildItem -LiteralPath $dir -Filter $pattern -File -ErrorAction SilentlyContinue)
+    $enumNames = [string[]]@($enum | ForEach-Object { $_.Name })
+    [Array]::Sort($enumNames, [System.StringComparer]::Ordinal)  # Ordinal 排序：原枚举序引擎不定 → 首个报错文件分叉
+    $enumByName = @{}
+    foreach ($e in $enum) { $enumByName[$e.Name] = $e }
+    foreach ($eName in $enumNames) {
+        $_ = $enumByName[$eName]
         $newName = & $converter $_.Name
         if($newName -and $newName -ne $_.Name){
             $dest = Join-Path $dir $newName
@@ -87,7 +98,9 @@ foreach($proj in $projects){
     }
 
     # 2) 迁移固定文件名（新目录 + 旧目录都扫，兼容部分迁移状态）
-    foreach($dirName in @($dirMap.Values | ForEach-Object { $_ }) + @('bible','summaries','phases','volumes','constraints')){
+    $dirNames = [string[]]@($dirMap.Values) + @('bible','summaries','phases','volumes','constraints')
+    [Array]::Sort($dirNames, [System.StringComparer]::Ordinal)  # 键序已定但值序仍随哈希迭代漂移（pwsh7/PS5.1 不同）→ 排定
+    foreach($dirName in $dirNames){
         $dir = Join-Path $memRoot $dirName
         if(-not (Test-Path -LiteralPath $dir)){ continue }
         foreach($k in ($fileMap.Keys | Sort-Object)){  # 键序确定（同上）
@@ -112,16 +125,24 @@ foreach($proj in $projects){
     $constraintDir = Join-Path $memRoot '约束'
 
     if(Test-Path -LiteralPath $sumDir){
-        Rename-Pattern $sumDir 'ch_*_summary.md' { param($n) if($n -match '^ch_(\d+)_summary\.md$'){ '第{0}章摘要.md' -f ([int]$Matches[1]).ToString('000') } }
-        Rename-Pattern $sumDir 'ch_*_quality.md' { param($n) if($n -match '^ch_(\d+)_quality\.md$'){ '第{0}章质量.md' -f ([int]$Matches[1]).ToString('000') } }
+        Rename-Pattern $sumDir 'ch_*_summary.md' { param($n)
+            if($n -match '^ch_([0-9]+)_summary\.md$'){  # [0-9] 收口（.NET \d 认 Nd 族后 [int] 裸转换英文异常页）
+                $cn = 0L
+                if([long]::TryParse($Matches[1], [ref]$cn)){ return '第{0}章摘要.md' -f $cn.ToString('000') }  # TryParse 收敛（裸 [int] 超界英文 Overflow 分叉）
+            } }
+        Rename-Pattern $sumDir 'ch_*_quality.md' { param($n)
+            if($n -match '^ch_([0-9]+)_quality\.md$'){  # [0-9] 收口同 summary
+                $qn = 0L
+                if([long]::TryParse($Matches[1], [ref]$qn)){ return '第{0}章质量.md' -f $qn.ToString('000') }
+            } }
     }
     if(Test-Path -LiteralPath $phaseDir){
-        Rename-Pattern $phaseDir 'phase_*_ch*-*.md' { param($n) if($n -match '^phase_(\d+)_ch(\d+)-(\d+)\.md$'){ '阶段{0}_第{1}-{2}章.md' -f $Matches[1], $Matches[2], $Matches[3] } }
-        Rename-Pattern $phaseDir 'phase_*_params.md' { param($n) if($n -match '^phase_(\d+)_params\.md$'){ '阶段{0}_参数.md' -f $Matches[1] } }
+        Rename-Pattern $phaseDir 'phase_*_ch*-*.md' { param($n) if($n -match '^phase_([0-9]+)_ch([0-9]+)-([0-9]+)\.md$'){ '阶段{0}_第{1}-{2}章.md' -f $Matches[1], $Matches[2], $Matches[3] } }  # [0-9] 收口（字符串插值无转换风险，仅 Nd 族正则拒）
+        Rename-Pattern $phaseDir 'phase_*_params.md' { param($n) if($n -match '^phase_([0-9]+)_params\.md$'){ '阶段{0}_参数.md' -f $Matches[1] } }  # [0-9] 收口同上
     }
     if(Test-Path -LiteralPath $volumeDir){
-        Rename-Pattern $volumeDir 'volume_*_ch*-*.md' { param($n) if($n -match '^volume_(\d+)_ch(\d+)-(\d+)\.md$'){ '卷{0}_第{1}-{2}章.md' -f $Matches[1], $Matches[2], $Matches[3] } }
-        Rename-Pattern $volumeDir 'volume_*_params.md' { param($n) if($n -match '^volume_(\d+)_params\.md$'){ '卷{0}_参数.md' -f $Matches[1] } }
+        Rename-Pattern $volumeDir 'volume_*_ch*-*.md' { param($n) if($n -match '^volume_([0-9]+)_ch([0-9]+)-([0-9]+)\.md$'){ '卷{0}_第{1}-{2}章.md' -f $Matches[1], $Matches[2], $Matches[3] } }  # [0-9] 收口同上
+        Rename-Pattern $volumeDir 'volume_*_params.md' { param($n) if($n -match '^volume_([0-9]+)_params\.md$'){ '卷{0}_参数.md' -f $Matches[1] } }  # [0-9] 收口同上
     }
 }
 

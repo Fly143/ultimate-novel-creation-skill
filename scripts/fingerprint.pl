@@ -1,6 +1,7 @@
 #!/usr/bin/perl
 # ============================================================
-# 全能小说作家 - 正文分布统计脚本（perl 版，与 fingerprint.py / fingerprint.ps1 同口径）
+# 全能小说作家 - 正文分布统计脚本（perl 版，降级近似口径：均值半入舍入、字数按码点计（非 BMP 比 UTF-16 码元少 1），
+# 与 fingerprint.py / fingerprint.ps1 的差异面见 README「perl 为降级路径近似口径」
 # 用途：无 python/pwsh 但有 perl 的环境（macOS/Unix/常用 shell）跑分布统计。
 # 用法: perl fingerprint.pl <正文.txt>
 # 输出: 句长/段长/对话占比/标点/修饰密度分布

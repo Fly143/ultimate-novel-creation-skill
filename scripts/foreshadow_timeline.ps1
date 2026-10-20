@@ -14,7 +14,9 @@ param(
 if ($CurrentCh -notmatch '^-?[0-9]+$') { [Console]::Out.WriteLine('❌ 参数错误：章节号须为纯 ASCII 十进制整数（对齐 py _i64）'); exit 1 }
 $CurrentChRaw = $CurrentCh  # param([string]) 类型约束会把赋值回炉成 String，先存原值再解约束重赋
 Remove-Variable -Name CurrentCh -Force -ErrorAction SilentlyContinue
-$CurrentCh = [long]$CurrentChRaw
+$_cvtCurrentCh = 0L
+if (-not [long]::TryParse($CurrentChRaw, [Globalization.NumberStyles]::Integer, [Globalization.CultureInfo]::InvariantCulture, [ref]$_cvtCurrentCh)) { [Console]::Out.WriteLine('❌ 参数错误：超出 Int64 范围（对齐 py _i64）'); exit 1 }  # TryParse 收敛：裸 [long] cast 在 EAP Stop 前是非终止错误、变量落 $null fail-open（纯十进制超界静默放行分叉）
+$CurrentCh = $_cvtCurrentCh
 
 $ErrorActionPreference = 'Stop'
 try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catch {}
@@ -29,8 +31,12 @@ function Get-Day([long]$ch) {
     return ([datetime]::new(2000, 1, 1)).AddDays($n - 1).ToString('yyyy-MM-dd', $inv)
 }
 function Get-Digits([string]$s) {
-    $m = [regex]::Match([string]$s, '(\d+)')
-    if ($m.Success) { return [long]$m.Groups[1].Value }
+    $m = [regex]::Match([string]$s, '([0-9]+)')  # ASCII 收口对齐 py（.NET \d 认 Unicode 数字族 ١٢/全角）
+    if ($m.Success) {
+        $n = 0L
+        if (-not [long]::TryParse($m.Groups[1].Value, [ref]$n)) { [Console]::Out.WriteLine(("❌ 章号超出日期换算上界：{0}（≤2913088 才能映射到 9999 年内）" -f $m.Groups[1].Value)); exit 1 }  # 超 Int64 同文案兜底对齐 py day_of（裸 .NET 异常为分叉）
+        return $n
+    }
     return $null
 }
 function Split-Row([string]$line) {
@@ -109,7 +115,8 @@ if (-not $hasState) {
         if ($idx.ContainsKey('id') -and $idx['id'] -lt $cells.Count) { $rawId = $cells[$idx['id']] }
         $fid = ''
         if ($rawId -ne '') {
-            if ($rawId -match '^\d+$') { $fid = "#$rawId" } else { $fid = $rawId }
+            # [0-9] 收口对齐 py isascii（.NET \d=\p{Nd} 认 ١٢/全角，py Nd 族不加 # 为产物分叉）
+            if ($rawId -match '^[0-9]+$') { $fid = "#$rawId" } else { $fid = $rawId }
         } else { $fid = 'F{0:D3}' -f $seq }
         $st = ''
         if ($idx.ContainsKey('status') -and $idx['status'] -lt $cells.Count) { $st = $cells[$idx['status']] }
@@ -122,39 +129,78 @@ if (-not $hasState) {
         if ($idx.ContainsKey('plan') -and $idx['plan'] -lt $cells.Count) { $planTxt = $cells[$idx['plan']] }
         $planned = Get-Digits $planTxt
         if ($null -eq $planned) { $planned = 0 }
-        $items += [pscustomobject]@{ id = $fid; name = $name; planted = [long]$planted; planned = [long]$planned; resolved = 0; status = $status }
+        $items += [pscustomobject]@{ id = $fid; name = $name; planted = [long]$planted; planned = [long]$planned; resolved = 0; status = $status; seq = $items.Count }
     }
 } else {
     $state = [System.IO.File]::ReadAllText($statePath, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
     $fs = @{}
     if ($null -ne $state.PSObject.Properties['foreshadow'] -and $null -ne $state.foreshadow) {
-        foreach ($p in $state.foreshadow.PSObject.Properties) { $fs[$p.Name] = $p.Value }
+        foreach ($p in $state.foreshadow.PSObject.Properties) { $fs[$p.Name] = $p.Value }  # @{} 仅供存在性/取值；遍历顺序须走 Properties（Keys 枚举序随引擎哈希漂移 → 首错归因分叉）
     }
-    foreach ($k in $fs.Keys) {
+function Get-NumCh($v, [string]$k, [string]$field) {
+    # 对齐 py _numch：缺失→0；bool→rc1「bool 不是章号」；非数值→rc1「章号不是数值：<repr>」；浮点向零截断且不小于 0
+    if ($null -eq $v.PSObject.Properties[$field]) { return 0 }
+    $raw = $v.$field
+    if ($raw -is [bool]) { if ($raw) { [Console]::Out.WriteLine(("❌ foreshadow.{0} 章号非法：bool 不是章号" -f $k)); exit 1 }; return 0 }  # false 按 0 对齐 py（true 才非法）
+    if ($raw -is [string] -and $raw -eq '') { return 0 }  # 空串按 0 对齐 py None/false/空串口径
+    try {
+        # [double] 宽松转换拒：pwsh7 把 "0x10" 静默转 16（PS5.1/py 拒）→ 用 invariant TryParse 纯十进制（对齐 py float() 拒 hex/Unicode 数字族）
+        $d = 0.0
+        if ($raw -isnot [string]) { $d = [double]$raw }
+        elseif (-not [double]::TryParse([string]$raw, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$d)) { throw 'nan' }
+        if ([double]::IsInfinity($d) -or [double]::IsNaN($d)) { throw 'nan' }
+        return [Math]::Max(0, [long][Math]::Truncate($d))
+    } catch {
+        # 统一 JSON/G 渲染对齐 py（str→json.dumps 双引号转义；数组/对象→ConvertTo-Json；浮点→[string] 大写 E；None→None）
+        # 已知口径：PS5.1 ConvertFrom-Json 把超 Int64 整数字面量解析为 Double → [string] 渲染 1E+30（pwsh7 BigInteger/py 精确 int 全数字），仅错误文案数字渲染差异，rc 三引擎同 1 fail-closed，接受为解析器固有差异；浮点溢出字面量（1e400）同理：PS5.1 ConvertFrom-Json 解析层拒「JSON 损坏」、py 走「章号不是数值：Infinity」，rc 同 1 fail-closed
+        $repr = if ($null -eq $raw) { 'None' } elseif ($raw -is [string] -or $raw -is [array] -or $raw -is [System.Collections.IDictionary] -or $raw.GetType().FullName -eq 'System.Management.Automation.PSCustomObject') { (ConvertTo-Json -InputObject $raw -Compress -Depth 4) } else { [string]$raw }
+        [Console]::Out.WriteLine(("❌ foreshadow.{0} 章号非法：章号不是数值：{1}" -f $k, $repr)); exit 1
+    }
+}
+    foreach ($fsProp in $state.foreshadow.PSObject.Properties) {  # 保 JSON 插入序遍历对齐 py dict 序（$fs.Keys 枚举序随引擎哈希漂移 → 多条目同坏时首错键名三引擎三样）
+        $k = $fsProp.Name
         $v = $fs[$k]
         if ($v -isnot [pscustomobject]) { Write-Output ("❌ foreshadow.{0} 须为对象（先 state_commit check 修复状态单）" -f $k); exit 1 }
-        # Truncate 对齐 py int()：浮点章号向零截断（state 闸已拦浮点，此处兜底独立运行场景）
-        $pl = 0; if ($null -ne $v.PSObject.Properties['planted_ch'] -and $v.planted_ch) { $pl = [math]::Truncate([double]$v.planted_ch) }
-        $planned = 0; if ($null -ne $v.PSObject.Properties['planned_resolve_ch'] -and $v.planned_resolve_ch) { $planned = [math]::Truncate([double]$v.planned_resolve_ch) }
-        $rs = 0; if ($null -ne $v.PSObject.Properties['resolved_ch'] -and $v.resolved_ch) { $rs = [math]::Truncate([double]$v.resolved_ch) }
+        # 章号解析对齐 py _numch：非法 rc1「章号非法」中文文案（裸 cast .NET 异常为分叉）；Truncate 对齐 py int()
+        $pl = Get-NumCh $v $k 'planted_ch'
+        $planned = Get-NumCh $v $k 'planned_resolve_ch'
+        $rs = Get-NumCh $v $k 'resolved_ch'
         $stt = 'open'; if ($rs -gt 0) { $stt = 'resolved' }
-        $items += [pscustomobject]@{ id = [string]$k; name = [string]$v.desc; planted = $pl; planned = $planned; resolved = $rs; status = $stt }
+        $descRaw = $null; if ($null -ne $v.PSObject.Properties['desc']) { $descRaw = $v.desc }
+        $desc = ''; if ($descRaw -is [string]) { $desc = $descRaw }  # 非字符串 desc 按空串对齐 py（[string] cast 渲染 "1 2" vs py "[1, 2]" 分叉）
+        $items += [pscustomobject]@{ id = [string]$k; name = $desc; planted = $pl; planned = $planned; resolved = $rs; status = $stt; seq = $items.Count }
     }
 }
 
 # 当前章（与 py 同源：正文最大编号 → state.last_committed → 0）
 if ($CurrentCh -le 0) {
-    $CurrentCh = 0
+    $CurrentCh = [long]0  # 显式 [long]：= 0 会把变量重绑 Int32，下游 [Math]::Max 绑到 Max(int,int) 对 planted+1>2^31 裸崩
     $bodyDir = Join-Path $Project '正文'
     if (Test-Path -LiteralPath $bodyDir) {
-        foreach ($f in Get-ChildItem -File -Path $bodyDir) {
-            $m = [regex]::Match($f.Name, '^第(\d+)章')
-            if ($m.Success) { $n = [long]$m.Groups[1].Value; if ($n -gt $CurrentCh) { $CurrentCh = $n } }
+        foreach ($f in Get-ChildItem -File -LiteralPath $bodyDir) {  # -Path 通配含 [] 路径会漏文件 → 当前章口径分叉（对齐 package_skill 同型修复）
+            $m = [regex]::Match($f.Name, '^第([0-9]+)章')  # ASCII 数字收口对齐 py（.NET \d 同认 Unicode 数字族）
+            if ($m.Success) {
+                $n = 0
+                if (-not [long]::TryParse($m.Groups[1].Value, [ref]$n)) { [Console]::Out.WriteLine(("❌ 章号超出日期换算上界：{0}（≤2913088 才能映射到 9999 年内）" -f $m.Groups[1].Value)); exit 1 }  # 超 Int64 同文案兜底对齐 py（裸 .NET 溢出异常为分叉）
+                if ($n -gt $CurrentCh) { $CurrentCh = $n }
+            }
         }
     }
     if ($CurrentCh -eq 0 -and $hasState) {
         $st2 = [System.IO.File]::ReadAllText($statePath, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
-        if ($null -ne $st2.PSObject.Properties['last_committed_chapter'] -and $st2.last_committed_chapter) { $CurrentCh = [math]::Truncate([double]$st2.last_committed_chapter) }  # Truncate 对齐 py int()
+        if ($null -ne $st2.PSObject.Properties['last_committed_chapter'] -and $st2.last_committed_chapter) {
+            # 对齐 py int(...)：整数/整数串 Truncate 截断；非整数串（"3.7"/"abc"）回退 0（[double] 宽松转换会把 "3.7" 截成 3 为分叉）
+            try {
+                $lc = $st2.last_committed_chapter
+                if ($lc -is [string]) { if ($lc.Trim() -notmatch '^[0-9]+$') { throw 'lc' }; $CurrentCh = [long]::Parse($lc.Trim(), [Globalization.NumberStyles]::Integer, [Globalization.CultureInfo]::InvariantCulture) }  # 拒负号对齐 py isdecimal（"-3" 原被接受分叉）
+                else {
+                    $lcD = [double]$lc
+                    if ($lcD -lt 0) { throw 'lc' }  # 负数拒对齐 py best<0 回退 0（原直通「第-5章」分叉）
+                    $CurrentCh = [long][math]::Truncate($lcD)  # 回 cast [long]：double 渲染科学计数法（E+18）与 py int 精确输出分叉
+                }
+            }
+            catch { $CurrentCh = 0 }
+        }
     }
 }
 
@@ -170,9 +216,9 @@ for ($i = 1; $i -lt $items.Count; $i++) {
 }
 
 $overdue = @($items | Where-Object { ($_.status -eq 'open' -or $_.status -eq 'near') -and $_.planned -gt 0 -and $CurrentCh -gt $_.planned })
-$overIds = @{}
-foreach ($o in $overdue) { $overIds[[string]$o.id] = $true }
-$pending = @($items | Where-Object { ($_.status -eq 'open' -or $_.status -eq 'near') -and -not $overIds.ContainsKey([string]$_.id) })
+$overSeq = @{}
+foreach ($o in $overdue) { $overSeq[[int]$o.seq] = $true }  # 序号判「不在过期集合」对齐 py `i not in overdue` 值相等语义（同值重复必然同进 overdue，seq 判等价；id 集合判会把同 id 另一条连坐排除 → 条目静默丢失分叉）
+$pending = @($items | Where-Object { ($_.status -eq 'open' -or $_.status -eq 'near') -and -not $overSeq.ContainsKey([int]$_.seq) })
 $resolved = @($items | Where-Object { $_.status -eq 'resolved' })
 $rest = @($items | Where-Object { $_.status -eq 'dropped' -or $_.status -eq 'paused' })
 $ord = [System.StringComparer]::Ordinal
@@ -225,7 +271,7 @@ foreach ($i in $pendOrder) {
     if ($endCh -le 0) { $endCh = [Math]::Max($CurrentCh, $i.planted + 1) }
     if ($endCh -le $i.planted) { $endCh = $i.planted + 1 }
     $tag = ''
-    if ($overIds.ContainsKey([string]$i.id)) { $tag = 'crit' }
+    if ($overSeq.ContainsKey([int]$i.seq)) { $tag = 'crit' }  # seq 判对齐 py 值相等（原 $overIds 已改名，此处漏改致 null 方法裸崩）
     elseif ($i.status -eq 'near') { $tag = 'active' }
     if ($tag -ne '') { $out += ('    {0} :{1}, {2}, {3}' -f $title, $tag, (Get-Day $i.planted), (Get-Day $endCh)) }
     else { $out += ('    {0} : {1}, {2}' -f $title, (Get-Day $i.planted), (Get-Day $endCh)) }

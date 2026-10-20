@@ -3,7 +3,7 @@
 # 全能小说作家 - 正文分布统计脚本（perl 字节级零依赖版）
 # 适用：缺 Encode/PerlIO 的精简 perl 环境（如 mawk+精简perl 沙箱），
 #       不依赖任何非核心模块，纯字节级 UTF-8 处理。
-# 口径与 fingerprint.pl / fingerprint.py / fingerprint.ps1 完全一致
+# 口径近似 fingerprint.pl（同为降级：均值半入、码点计数——非 BMP 与 py/ps1 码元口径差 1；空白集更窄仅 7 类字符，\x85/U+2028 等不切段，段长/句长均值可偏宽；输出多汉字数辅助字段，见 README）
 # （总字数=全部字符；句长=句内字符数；方差=总体方差 Σ(x-μ)²/n）。
 #
 # 用法:
@@ -65,7 +65,7 @@ for my $line (split(/\r?\n/, $t)) {
     push @paras, $line if length($line) > 0;
 }
 my @pl = sort { $a <=> $b } map { charcount($_) } @paras;
-if (!@pl) { print "❌ 无可统计段落（正文仅含空白），无法计算段落分布\n"; exit 1 }  # 对齐 fingerprint.pl:26 空集守卫
+if (!@pl) { print "❌ 无可统计段落（正文仅含空白），无法计算段落分布\n"; exit 1 }  # 对齐 fingerprint.pl 空集守卫（无段落即中止）
 my $pSum = 0; $pSum += $_ for @pl;
 my $pAvg = int(0.5 + $pSum/@pl);
 my $pMed = $pl[int(scalar(@pl)/2)];  # 上中位（对齐 py pl[len//2] / ps1 Floor(Count/2)，偶数样本不再取下中位）
@@ -84,7 +84,7 @@ while ($raw =~ /($NONSENT)($TERM)?/g) {
     push @sl, $L if $L > 0 && $L < 300;
 }
 @sl = sort { $a <=> $b } @sl;
-if (!@sl) { print "❌ 无可统计句子（全部句子 ≥300 单元，无法计算句长分布）\n"; exit 1 }  # 对齐 fingerprint.pl:44
+if (!@sl) { print "❌ 无可统计句子（全部句子 ≥300 单元，无法计算句长分布）\n"; exit 1 }  # 对齐 fingerprint.pl 无句子守卫
 my $sSum = 0; $sSum += $_ for @sl;
 my $sAvg = sprintf("%.1f", $sSum/@sl); my $sMed = $sl[int(scalar(@sl)/2)];  # 上中位（对齐 py/ps1）
 my ($s12, $s20) = (0, 0);
@@ -104,7 +104,7 @@ while ($raw =~ /($NONALL)($COMMA)?/g) {
     push @cl, $L if $L > 0;
 }
 my $cSum = 0; $cSum += $_ for @cl;
-my $cAvg = @cl ? sprintf("%.1f", $cSum/@cl) : "0.0";  # 空集均值 0.0（对齐 fingerprint.pl:61 / ps1 Measure-Object）
+my $cAvg = @cl ? sprintf("%.1f", $cSum/@cl) : "0.0";  # 空集均值 0.0（对齐 fingerprint.pl 空集分支 / ps1 Measure-Object）
 
 # ---- 对话占比（“…”或「…」，含引号字符，同 fingerprint.pl 的 $&）----
 # ★v9.5.7 修复：字节模式负向前瞻 (?:(?!右引号).)* 会跨过右引号（中间字节被 . 消费），

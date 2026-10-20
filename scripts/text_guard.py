@@ -63,9 +63,10 @@ def body_globs():
 
 def find_body(project, ch):
     cands = []
+    _proj = glob.escape(project)  # 项目路径含 []?* 时须转义：整段嵌进 glob 模式会被当字符类/通配 → 匹配不到（对齐 ps1 -LiteralPath，d49① 分叉回归）
     for g in body_globs():
-        pat = os.path.join(project, g.replace("{nnn}", f"{ch:03d}").replace("{ch}", str(ch)))
-        cands.extend(sorted(glob.glob(pat)))
+        pat = os.path.join(_proj, g.replace("{nnn}", f"{ch:03d}").replace("{ch}", str(ch)))
+        cands.extend(sorted(p for p in glob.glob(pat) if os.path.isfile(p)))  # 过滤目录对齐 ps1 -File（目录冒名 open 裸崩 IsADirectoryError）
     return os.path.relpath(cands[0], project).replace("\\", "/") if cands else ""
 
 
@@ -95,6 +96,21 @@ def load_ledger(project):
     if not isinstance(data, dict):
         print(f"❌ 账本须为 JSON 对象：{p}（顶层非对象，如数组/标量）")  # 对齐 check-done 规则单同款判型（原 TypeError 裸崩 / ps1 误判「无记录」rc2）
         raise SystemExit(1)
+    chs = data.get("chapters")
+    if not isinstance(chs, dict):
+        print(f"❌ 账本须为 JSON 对象：{p}（chapters 非对象，如 null/数组/标量）")  # 判型 fail-closed（原 KeyError 裸崩 / ps1 fail-open 重写账本丢历史条目）
+        raise SystemExit(1)
+    for _k, _rec in chs.items():
+        if (not _k.isdigit() or not _k.isascii()) or int(_k) > 9223372036854775807:
+            print(f"❌ 账本条目非法：chapters.{_k} 键须为纯数字章号（先删账本重跑 digest）")  # 键判型 fail-closed；isascii 排 Unicode 数字族；超 Int64 挡（ps1 [long] 裸崩、py 渲染正常为分叉）
+            raise SystemExit(1)
+        _units = _rec.get("units") if isinstance(_rec, dict) else None
+        if (not isinstance(_rec, dict) or not isinstance(_rec.get("sha256"), str)
+                or not isinstance(_rec.get("units"), int) or isinstance(_rec.get("units"), bool)  # bool 是 int 子类，须显式排除（ps1 判型拒 → 分叉）
+                or (isinstance(_units, int) and not (-9223372036854775808 <= _units <= 9223372036854775807))  # Int64 上界对齐 ps1 [long] 判型与 check-doc-budget _in_i64 范式（py 原放行进 verify 判「手改」语义分叉）
+                or not isinstance(_rec.get("file"), str)):
+            print(f"❌ 账本条目非法：chapters.{_k} 须含 str sha256 / int units / str file（先删账本重跑 digest）")  # 条目 schema fail-closed（原 KeyError/TypeError 裸崩；IsADirectoryError 目录落盘）
+            raise SystemExit(1)
     return data
 
 
@@ -137,7 +153,7 @@ def main():
             return 2
         rel = find_body(a.project, a.chapter) or rec.get("file", "")
         fp = os.path.join(a.project, rel)
-        if not os.path.exists(fp):
+        if not os.path.isfile(fp):  # 目录按未找到处理对齐 ps1（open 目录裸 IsADirectoryError）
             print(f"【手改检测】第{a.chapter:03d} 正文文件未找到（glob：正文/第{a.chapter:03d}章_*.txt）")
             return 2
         sha, units = digest_of(fp)
@@ -157,7 +173,7 @@ def main():
         rec = ledger["chapters"][k]
         rel = find_body(a.project, int(k)) or rec.get("file", "")
         fp = os.path.join(a.project, rel)
-        if not os.path.exists(fp):
+        if not os.path.isfile(fp):  # 目录按未找到处理对齐 ps1（open 目录裸 IsADirectoryError）
             print(f"【手改检测】第{int(k):03d} 正文文件未找到（记录：{rec.get('file','')}）")
             bad_n += 1
             continue

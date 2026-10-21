@@ -100,7 +100,16 @@ function Test-StateSchema {
         $errs += 'summaries 须为对象'
     }
     elseif ($null -ne $State.summaries) {
-        foreach ($sk in $State.summaries.PSObject.Properties) { if ([string]$sk.Name -notmatch '\A[0-9]{1,18}\z') { $errs += 'summaries 键必须是十进制数字字符串（≤18 位）'; break } }
+        $badKey = $false
+        foreach ($sk in $State.summaries.PSObject.Properties) { if ([string]$sk.Name -notmatch '\A[0-9]{1,18}\z') { $errs += 'summaries 键必须是十进制数字字符串（≤18 位）'; $badKey = $true; break } }
+        if (-not $badKey) {
+            $seenSum = @{}
+            foreach ($sk in $State.summaries.PSObject.Properties) {
+                $nn = [string]([long]$sk.Name)
+                if ($seenSum.ContainsKey($nn)) { $errs += ('summaries 撞键：{0} 与 {1} 指向同一章（渲染会互相覆盖）' -f $seenSum[$nn], $sk.Name); break }
+                $seenSum[$nn] = [string]$sk.Name
+            }
+        }
     }
     if ($null -eq $State.timeline -or $null -eq $State.timeline.PSObject.Properties['readers_known'] -or $null -eq $State.timeline.PSObject.Properties['authors_truth']) {
         $errs += 'timeline 必须含 readers_known / authors_truth 两键'
@@ -205,7 +214,9 @@ function New-DefaultState {
 
 function ConvertTo-StateJson {
     param($State)
-    return ($State | ConvertTo-Json -Depth 100) + $nl
+    # py 口径：行尾统一 LF（ConvertTo-Json 在 Windows 产 CRLF，两引擎交替提交会整文件重写）
+    $txt = ($State | ConvertTo-Json -Depth 100) -replace "`r`n", "`n"
+    return $txt + "`n"
 }
 
 function Write-StateFile {
@@ -385,15 +396,47 @@ function Get-DerivedViews {
     return $views
 }
 
+function Get-DerivedManifestPath {
+    param($Project)
+    return (Join-Path (Join-Path $Project '.story') 'derived-manifest.json')
+}
+
+function Get-DerivedManifest {
+    param($Project)
+    $p = Get-DerivedManifestPath $Project
+    if (-not (Test-Path -LiteralPath $p -PathType Leaf)) { return @() }
+    try {
+        $obj = Get-Content -LiteralPath $p -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($null -eq $obj -or $null -eq $obj.PSObject.Properties['files']) { return @() }
+        return @($obj.files | ForEach-Object { [string]$_ } | Where-Object { $_ -ne '' })
+    } catch { return @() }
+}
+
+function Save-DerivedManifest {
+    param($Project, $Keys)
+    $p = Get-DerivedManifestPath $Project
+    $sorted = [string[]]@($Keys | Sort-Object -CaseSensitive)
+    $json = ([ordered]@{ files = $sorted } | ConvertTo-Json -Depth 5) -replace "`r`n", "`n"
+    Write-Utf8File -Path $p -Text ($json + "`n")
+}
+
 function Write-DerivedViews {
     param($Project, $Views)
     $base = Join-Path $Project '记忆系统'
     $written = 0
+    $old = @(Get-DerivedManifest $Project)
     foreach ($k in $Views.Keys) {
         $p = Join-Path $base ($k -replace '/', [string][char]92)
         Write-Utf8File -Path $p -Text $Views[$k]
         $written++
     }
+    # 清理上一轮写过、本轮 state 已无对应条目的派生件（只删自己写过的，绝不碰手写件）
+    foreach ($rel in $old) {
+        if ($Views.Contains($rel)) { continue }
+        $sp = Join-Path $base ($rel -replace '/', [string][char]92)
+        if (Test-Path -LiteralPath $sp -PathType Leaf) { Remove-Item -LiteralPath $sp -Force -ErrorAction SilentlyContinue }
+    }
+    Save-DerivedManifest -Project $Project -Keys @($Views.Keys)
     return $written
 }
 
@@ -406,6 +449,12 @@ function Compare-DerivedViews {
         if (-not (Test-Path -LiteralPath $p)) { $bad += ('{0}（缺失）' -f $k); continue }
         $cur = [System.IO.File]::ReadAllText($p, $enc).Replace("`r`n", "`n")
         if ($cur -ne $Views[$k]) { $bad += $k }
+    }
+    foreach ($rel in @(Get-DerivedManifest $Project)) {
+        if ($Views.Contains($rel)) { continue }
+        if ($rel.StartsWith('摘要/')) { continue }  # 摘要自有 stale 检查点名，这里不重复判红
+        $sp = Join-Path $base ($rel -replace '/', [string][char]92)
+        if (Test-Path -LiteralPath $sp -PathType Leaf) { $bad += ('{0}（残留：state 已无该条目）' -f $rel) }
     }
     return ,$bad
 }
@@ -708,10 +757,16 @@ switch ($Command) {
             }
             $donePath = $null
             if ($Chapter -ge 1) {
-                $doneDir = Join-Path $ProjectPath '.done'
-                if (-not (Test-Path -LiteralPath $doneDir)) { New-Item -ItemType Directory -Path $doneDir -Force | Out-Null }
-                $donePath = Join-Path $doneDir ('第{0:d3}章_state.done' -f $Chapter)
-                [System.IO.File]::WriteAllBytes($donePath, [byte[]]@())
+                try {
+                    $doneDir = Join-Path $ProjectPath '.done'
+                    if (-not (Test-Path -LiteralPath $doneDir)) { New-Item -ItemType Directory -Path $doneDir -Force | Out-Null }
+                    $donePath = Join-Path $doneDir ('第{0:d3}章_state.done' -f $Chapter)
+                    [System.IO.File]::WriteAllBytes($donePath, [byte[]]@())
+                } catch {
+                    # 到此 state 与派生已落盘、revision 已推进：重跑 commit 必 stale，故给补标记路径
+                    Write-Output ('❌ 写入失败：状态单与派生已刷新，但 .done 标记未创建：{0}（勿重跑 commit，会因 stale 被拒；补建 .done/第{1:d3}章_state.done 空标记后跑 state_commit check 复核）' -f $_.Exception.Message, $Chapter)
+                    exit 1
+                }
             }
             $commitOk = $true
         }

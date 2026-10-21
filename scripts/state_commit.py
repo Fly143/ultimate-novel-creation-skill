@@ -112,6 +112,14 @@ def validate_state(s: dict) -> list[str]:
         errs.append("summaries 须为对象")
     if isinstance(_summ, dict) and not all(isinstance(k, str) and re.fullmatch(r"[0-9]{1,18}", k) for k in _summ):
         errs.append("summaries 键必须是十进制数字字符串（≤18 位）")
+    elif isinstance(_summ, dict):
+        _seen: dict[int, str] = {}
+        for _k in _summ:
+            _n = int(_k)
+            if _n in _seen:  # "1" 与 "001" 渲染到同一 摘要/第001章摘要.md，后者会静默覆盖
+                errs.append(f"summaries 撞键：{_seen[_n]} 与 {_k} 指向同一章（渲染会互相覆盖）")
+                break
+            _seen[_n] = _k
     tl = s.get("timeline", {})
     if not isinstance(tl, dict) or not all(k in tl for k in ("readers_known", "authors_truth")):
         errs.append("timeline 必须含 readers_known / authors_truth 两键")
@@ -489,7 +497,12 @@ def cmd_commit(project: Path, chapter: int, input_file: Path | None) -> int:
             state_render.write_views(project, views)
         except OSError as exc:
             return _die(f"写入失败：派生视图未刷新（状态单已写入、事务已过期）：{exc}。修环境后跑 state_render.py --project 补渲染 + state_commit check 复核")
-        done = touch_done(project, chapter) if chapter >= 1 else None
+        try:
+            done = touch_done(project, chapter) if chapter >= 1 else None
+        except OSError as exc:
+            # 到此 state 与派生已落盘、revision 已推进：重跑 commit 必 stale，故给补标记路径而非"重跑"
+            return _die(f"写入失败：状态单与派生已刷新，但 .done 标记未创建：{exc}"
+                        f"（勿重跑 commit，会因 stale 被拒；补建 .done/第{chapter:03d}章_state.done 空标记后跑 state_commit check 复核）")
     except OSError as exc:
         return _die(f"写入失败：{exc}（修正环境后重跑同一份 commit，事务文件已保留）")
     finally:

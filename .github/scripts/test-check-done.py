@@ -1726,6 +1726,89 @@ def _run(results: list[bool]) -> int:
             _id_cond, _id_detail = False, f"{type(_exc).__name__}: {_exc}"
         results.append(case(f"[🔴回归] 同章重复 commit → facts/timeline 不重复且 check 仍 PASS [{_e_id}]", True, _id_cond, _id_detail))
 
+    # w4) summaries 撞键 → 双引擎 rc1 同文案（"1" 与 "001" 渲染同一文件会互相覆盖）
+    def _sum_collide(engine):
+        proj = _nhd / f"p_sumc_{engine}"
+        proj.mkdir(parents=True, exist_ok=True)
+        (proj / "init.json").write_text(json.dumps({"book_title": "撞键书", "summaries": {"1": "a", "001": "b"}}, ensure_ascii=False), encoding="utf-8")
+        code, out = run_state(engine, "init", "--project", str(proj), "--input", str(proj / "init.json"))
+        return code == 1 and "撞键" in out
+    for _e_sc in ENGINES:
+        try:
+            _sc_cond, _sc_detail = bool(_sum_collide(_e_sc)), ""
+        except Exception as _exc:  # noqa: BLE001
+            _sc_cond, _sc_detail = False, f"{type(_exc).__name__}: {_exc}"
+        results.append(case(f"[🔴回归] summaries 撞键（1 与 001）→ 双引擎 rc1 同文案 [{_e_sc}]", True, _sc_cond, _sc_detail))
+
+    # w5) _state.json 行尾 LF（ps1 原用 CRLF，两引擎交替提交会整文件重写）
+    def _eol_ok(engine):
+        proj = _nhd / f"p_eol_{engine}"
+        proj.mkdir(parents=True, exist_ok=True)
+        run_state(engine, "init", "--project", str(proj))
+        return bytes([13, 10]) not in (proj / "记忆系统" / "_state.json").read_bytes()
+    for _e_eo in ENGINES:
+        try:
+            _eo_cond, _eo_detail = bool(_eol_ok(_e_eo)), ""
+        except Exception as _exc:  # noqa: BLE001
+            _eo_cond, _eo_detail = False, f"{type(_exc).__name__}: {_exc}"
+        results.append(case(f"[🔴回归] _state.json 行尾统一 LF [{_e_eo}]", True, _eo_cond, _eo_detail))
+
+    # w6) 派生残留：state 删摘要后 py 重渲染清掉旧文件；ps1 check 点名残留
+    def _residue_ok():
+        proj = _nhd / "p_residue"
+        proj.mkdir(parents=True, exist_ok=True)
+        run_state("py", "init", "--project", str(proj))
+        run_state("py", "draft", "--project", str(proj), "--chapter", "1")
+        txn = write_txn(proj, 1, chapter_delta(1, "甲"))
+        run_state("py", "commit", "--project", str(proj), "--chapter", "1", "--input", str(txn))
+        f = proj / "记忆系统" / "摘要" / "第001章摘要.md"
+        had = f.is_file()
+        stf = proj / "记忆系统" / "_state.json"
+        _o = json.loads(stf.read_text(encoding="utf-8"))
+        _o["summaries"] = {}
+        stf.write_text(json.dumps(_o, ensure_ascii=False, indent=2), encoding="utf-8", newline="\n")
+        subprocess.run([PY, str(ROOT / "scripts" / "state_render.py"), "--project", str(proj)],
+                       capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+        removed = not f.exists()
+        return had and removed
+
+    for _nm_res, _fn_res in (("py 重渲染清理旧摘要", _residue_ok),):
+        try:
+            _rs_cond, _rs_detail = bool(_fn_res()), ""
+        except Exception as _exc:  # noqa: BLE001
+            _rs_cond, _rs_detail = False, f"{type(_exc).__name__}: {_exc}"
+        results.append(case(f"[🔴回归] 派生残留：{_nm_res}", True, _rs_cond, _rs_detail))
+
+    # w7) migrate_memory_paths：目录级冲突 → rc1 且旧目录内不改名；嵌套两层项目可发现
+    _mm_ps1 = ROOT / "scripts" / "migrate_memory_paths.ps1"
+    def _mm_run(target, apply=True):
+        cmd = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(_mm_ps1), "-TargetDir", str(target)] + (["-Apply"] if apply else [])
+        _pr = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+        return _pr.returncode, _decode(_pr.stdout) + _decode(_pr.stderr)
+    def _mm_conflict_ok():
+        root = _nhd / "p_mm_conf"
+        book = root / "book" / "记忆系统"
+        (book / "bible").mkdir(parents=True, exist_ok=True)
+        (book / "圣经").mkdir(parents=True, exist_ok=True)
+        (book / "bible" / "story_bible.md").write_text("# old\n", encoding="utf-8")
+        (book / "圣经" / "故事圣经.md").write_text("# new\n", encoding="utf-8")
+        rc, out = _mm_run(root)
+        return (rc == 1 and "冲突" in out
+                and (book / "bible" / "story_bible.md").is_file())
+    def _mm_nested_ok():
+        root = _nhd / "p_mm_nest"
+        book = root / "外层" / "书乙" / "记忆系统"
+        (book / "bible").mkdir(parents=True, exist_ok=True)
+        (book / "bible" / "story_bible.md").write_text("# s\n", encoding="utf-8")
+        rc, out = _mm_run(root)
+        return rc == 0 and (book / "圣经" / "故事圣经.md").is_file()
+    for _nm_mm, _fn_mm in (("目录级冲突 rc1 且不改名", _mm_conflict_ok), ("嵌套两层项目可发现", _mm_nested_ok)):
+        try:
+            _mm_cond, _mm_detail = bool(_fn_mm()), ""
+        except Exception as _exc:  # noqa: BLE001
+            _mm_cond, _mm_detail = False, f"{type(_exc).__name__}: {_exc}"
+        results.append(case(f"[🔴回归] migrate_memory_paths：{_nm_mm}", True, _mm_cond, _mm_detail))
+
     # x) ch0 大纲种子提交：draft/commit --chapter 0 → 渲染真相时间线、不产生 .done 标记
     def _seed_ok(engine):
         proj = _nhd / f"p_seed_{engine}"

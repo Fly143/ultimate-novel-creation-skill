@@ -199,19 +199,56 @@ def render_views(state: dict) -> dict[str, str]:
     return views
 
 
+MANIFEST_REL = ".story/derived-manifest.json"
+
+
+def _manifest_path(project: Path) -> Path:
+    return project / MANIFEST_REL
+
+
+def _load_manifest(project: Path) -> list[str]:
+    """上一轮由本模块写过的派生件清单（只用于清理自己的旧产物，绝不触碰手写件）。"""
+    try:
+        d = json.loads(_manifest_path(project).read_text(encoding="utf-8-sig"))
+        files = d.get("files") if isinstance(d, dict) else None
+        return [str(x) for x in files] if isinstance(files, list) else []
+    except (OSError, ValueError):
+        return []
+
+
+def _save_manifest(project: Path, files) -> None:
+    p = _manifest_path(project)
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps({"files": sorted(files)}, ensure_ascii=False, indent=1) + "\n",
+                     encoding="utf-8", newline="\n")
+    except OSError:
+        pass  # 清单写失败不影响派生正确性，只是下一轮少清理
+
+
 def write_views(project: Path, views: dict[str, str]) -> list[str]:
     base = project / "记忆系统"
     written: list[str] = []
+    old = _load_manifest(project)
     for rel, text in views.items():
         p = base / rel
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(text, encoding="utf-8", newline="\n")
         written.append(rel)
+    # 清理上一轮写过、本轮 state 已无对应条目的派生件（否则残留会被当上下文读，且 check 看不出来）
+    for rel in sorted(set(old) - set(views)):
+        p = base / rel
+        try:
+            if p.is_file():
+                p.unlink()
+        except OSError:
+            pass
+    _save_manifest(project, views.keys())
     return written
 
 
 def compare_views(project: Path, views: dict[str, str]) -> list[str]:
-    """返回不一致的相对路径列表（缺文件/内容不同都算不一致）。"""
+    """返回不一致的相对路径列表（缺文件/内容不同/旧派生残留都算不一致）。"""
     base = project / "记忆系统"
     bad: list[str] = []
     for rel, text in views.items():
@@ -222,6 +259,11 @@ def compare_views(project: Path, views: dict[str, str]) -> list[str]:
         cur = p.read_text(encoding="utf-8-sig", errors="replace").replace("\r\n", "\n")
         if cur != text:
             bad.append(rel)
+    for rel in sorted(set(_load_manifest(project)) - set(views)):
+        if rel.startswith("摘要/"):
+            continue  # 摘要自有 stale 检查点名（缺/多余），这里不重复判红
+        if (base / rel).is_file():
+            bad.append(f"{rel}（残留：state 已无该条目）")
     return bad
 
 

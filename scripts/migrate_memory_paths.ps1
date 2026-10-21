@@ -68,9 +68,10 @@ function Rename-Pattern([string]$dir, [string]$pattern, [scriptblock]$converter)
 }
 
 # ---- 找到所有含 记忆系统/ 的旧目录（旧项目特征：bible 目录存在或英文文件名存在）----
-$projects = Get-ChildItem -LiteralPath $TargetDir -Directory -ErrorAction SilentlyContinue | Where-Object {
-    Test-Path -LiteralPath (Join-Path $_.FullName '记忆系统')
-}
+$projects = Get-ChildItem -LiteralPath $TargetDir -Directory -Recurse -Depth 2 -ErrorAction SilentlyContinue | Where-Object {
+    # 递归两层：书放在 TargetDir/外层/书 时也能发现（只扫一层曾静默 0 项报「可能已迁移」）
+    $_.FullName -notmatch '记忆系统' -and (Test-Path -LiteralPath (Join-Path $_.FullName '记忆系统'))
+} | Sort-Object -Property FullName
 
 if($projects.Count -eq 0){
     Write-Host "未在 '$TargetDir' 下找到含 记忆系统/ 目录的项目（可能已迁移或路径不对）。" -ForegroundColor Yellow
@@ -78,6 +79,8 @@ if($projects.Count -eq 0){
 }
 
 $totalMoves = 0
+$conflicts = @()   # 目录级冲突：新旧目录并存时不得再在旧目录内改名（否则两处内容分叉且 rc0 报成功）
+$skipDirs = @{}
 foreach($proj in $projects){
     $memRoot = Join-Path $proj.FullName '记忆系统'
     Write-Host ""
@@ -88,7 +91,11 @@ foreach($proj in $projects){
         $old = Join-Path $memRoot $k
         $new = Join-Path $memRoot $dirMap[$k]
         if(Test-Path -LiteralPath $old){
-            if(Test-Path -LiteralPath $new){ Write-Host "  [跳过] 目录 $old (目标 $new 已存在)" -ForegroundColor Yellow }
+            if(Test-Path -LiteralPath $new){
+                Write-Host "  [跳过] 目录 $old (目标 $new 已存在)" -ForegroundColor Yellow
+                $conflicts += $old
+                $skipDirs[$old] = $true
+            }
             else {
                 Write-Host "  $('[' + $(if($Apply){'迁移'}else{'预览'}) + ']') 目录 $old -> $new" -ForegroundColor $(if($Apply){'Green'}else{'Cyan'})
                 if($Apply){ Move-Item -LiteralPath $old -Destination $new }
@@ -103,6 +110,7 @@ foreach($proj in $projects){
     foreach($dirName in $dirNames){
         $dir = Join-Path $memRoot $dirName
         if(-not (Test-Path -LiteralPath $dir)){ continue }
+        if($skipDirs.ContainsKey($dir)){ Write-Host "  [跳过] $dir 内不改名（目录级冲突，先人工合并两处内容）" -ForegroundColor Yellow; continue }
         foreach($k in ($fileMap.Keys | Sort-Object)){  # 键序确定（同上）
             $old = Join-Path $dir $k
             if(Test-Path -LiteralPath $old){
@@ -150,6 +158,12 @@ Write-Host ""
 if(-not $Apply){
     Write-Host "========== 预览完成：共 $totalMoves 项待迁移。确认无误后加 -Apply 执行。 ==========" -ForegroundColor Cyan
 } else {
+    if($conflicts.Count -gt 0){
+        Write-Host ("❌ 有 {0} 处目录级冲突未处理（新旧目录并存，旧目录内文件未改名）：" -f $conflicts.Count) -ForegroundColor Red
+        foreach($cf in $conflicts){ Write-Host ("   - {0}" -f $cf) -ForegroundColor Red }
+        Write-Host "   请先人工合并两处内容（或删除已空的旧目录）后重跑；本次已迁移 $totalMoves 项。" -ForegroundColor Yellow
+        exit 1
+    }
     Write-Host "========== 迁移完成：共 $totalMoves 项已迁移。 ==========" -ForegroundColor Green
     Write-Host "提示：迁移后旧项目的报告文件命名不受影响；正文无需改动。若项目内自定义文档引用了旧路径，请手动更新。" -ForegroundColor Yellow
     Write-Host "      另：v9.5.18 起正文不再追加元数据块（改存 报告/第NNN章_章节档案.md），旧章节无需迁移；" -ForegroundColor Yellow

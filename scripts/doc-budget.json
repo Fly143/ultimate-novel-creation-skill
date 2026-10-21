@@ -10,11 +10,11 @@
   "baseline": {
     "measured_on": "2026-10-21",
     "machine": "Windows 11 / PowerShell 5.1 与 pwsh 7.4（便携版 pwsh 需入 PATH，具体路径见维护者本地环境）双环境实跑一致；pwsh7 侧读数由套件 env1 链每轮复跑",
-    "worst_path_chars": 47696,
+    "worst_path_chars": 47709,
     "writer_delegated_chars": 22891,
     "session_resident_chars": 29746,
-    "precheck_path_chars": 24400,
-    "max_single_file": "modules/03_26_功能模块.md=20348",
+    "precheck_path_chars": 24380,
+    "max_single_file": "modules/03_26_功能模块.md=20361",
     "howto": "python scripts/check-doc-budget.py --print-baseline（口径=去空白字符；改文档后必须回填本块）。max_single_file 口径=files[] 登记文件中去空白字符最大者，非「发布包内最大文件」（scripts/*.ps1 不在登记表）"
   },
   "files": [

@@ -10,7 +10,7 @@ version: 9.6.0
 
 **本 skill 中所有文件引用遵循以下规则：**
 
-1. **skill 内部文件**：`modules/`、`references/`、`templates/`、`memory-system/`（skill 内模板）等路径，均相对于本 skill 的根目录。
+1. **skill 内部文件**：`modules/`、`references/`、`templates/`、`memory-system/`（skill 内模板）等路径，均相对于本 skill 的根目录（`scripts/…` 命令也在该根执行；项目侧参数写该书绝对路径，见 00「命令执行基准」）。
    - 示例：`references/书名生成策略.md` → skill 目录下的 references/书名生成策略.md
    - 示例：`memory-system/bible/story_bible.md`（不带 `[书名]/` 前缀）→ skill 内模板文件，只读
 

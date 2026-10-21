@@ -3,9 +3,10 @@
 """package_skill.py —— 技能发布包打包与校验（P3-19）。
 
 校验 SKILL.md frontmatter（name/description/version 必填）→ 收集运行时载荷
-载荷：SKILL.md / system_prompt.md / LICENSE / NOTICE / modules / templates / references / scripts（权威白名单见 INCLUDE_FILES / INCLUDE_DIRS）。
+载荷：SKILL.md / system_prompt.md / LICENSE / NOTICE / THIRD-PARTY-LICENSES.txt / modules / templates / references / scripts / memory-system（权威白名单见 INCLUDE_FILES / INCLUDE_DIRS）。
+  memory-system 为项目初始化模板源（03_01 步骤8.2 读取 8 个模板），属运行时必需，不得排除。
 → --check 只打印清单；默认再产出确定性 zip（固定时间戳+排序；同一 Python 解释器两次运行字节一致，跨解释器 zlib 差异可致字节不同，载荷计数不受影响）。
-排除：.git / .github / .agents / dist / 记忆系统模板 等过程资产。
+排除：.git / .github / dist 等过程资产。
 双实现口径：--check 清单输出与 package_skill.ps1 逐字节一致；zip 仅 py 产出（见实施记录偏离项）。
 用法：
   python scripts/package_skill.py --check
@@ -24,8 +25,8 @@ class _ArgParser(argparse.ArgumentParser):
         raise SystemExit(1)
 
 
-INCLUDE_DIRS = ["modules", "templates", "references", "scripts"]
-INCLUDE_FILES = ["SKILL.md", "system_prompt.md", "LICENSE", "NOTICE"]  # NOTICE=OpenFic Apache-2.0 署名（HANDOFF:133 要求随包保留）
+INCLUDE_DIRS = ["modules", "templates", "references", "scripts", "memory-system"]  # memory-system=项目初始化模板源（03_01 步骤8.2）
+INCLUDE_FILES = ["SKILL.md", "system_prompt.md", "LICENSE", "NOTICE", "THIRD-PARTY-LICENSES.txt"]  # NOTICE+THIRD-PARTY-LICENSES=Apache-2.0 §4(a)(b) 随包义务
 FM_REQUIRED = ["name", "description", "version"]
 
 

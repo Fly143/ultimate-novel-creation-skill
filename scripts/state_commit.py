@@ -271,17 +271,27 @@ def release_lock(lock: Path | None) -> None:
 
 
 # ---------------- delta 合并 ----------------
-def apply_delta(state: dict, delta: dict) -> None:
-    """dict 递归合并；facts/timeline.* 追加；其余（含 context 列表）以 delta 为准整体替换。"""
+def apply_delta(state: dict, delta: dict, chapter: int | None = None) -> None:
+    """dict 递归合并；facts/timeline.* 追加（同章重跑按章替换/逐条去重，保证 commit 幂等）；其余（含 context 列表）以 delta 为准整体替换。"""
     for key, val in delta.items():
         if key in ("facts",):
             state.setdefault(key, [])
-            state[key].extend(val or [])
+            new = list(val or [])
+            if chapter is not None:
+                # 同章重跑=替换该章条目：03_26 五·状态提交的失败处置要求"重跑同一份 commit"，
+                # 若只追加会让同批事实按次成倍重复（数据静默污染且 check 仍绿）
+                state[key] = [e for e in state[key]
+                              if not (isinstance(e, dict) and e.get("chapter") == chapter)]
+            for e in new:
+                if e not in state[key]:
+                    state[key].append(e)
         elif key == "timeline" and isinstance(val, dict):
             tl = state.setdefault("timeline", {"readers_known": [], "authors_truth": []})
             for sub, items in val.items():
                 tl.setdefault(sub, [])
-                tl[sub].extend(items or [])
+                for e in (items or []):
+                    if e not in tl[sub]:  # 同一份事务重跑不重复追加
+                        tl[sub].append(e)
         elif key == "summaries" and isinstance(val, dict):
             state.setdefault("summaries", {}).update(val)
         elif key == "wordcounts" and isinstance(val, dict):
@@ -464,7 +474,7 @@ def cmd_commit(project: Path, chapter: int, input_file: Path | None) -> int:
                 f"stale transaction（锁内复核）：expected={txn['expected_state_revision']} "
                 f"actual={st['state_revision']}"
             )
-        apply_delta(st, txn["delta"])
+        apply_delta(st, txn["delta"], chapter)
         _verr = validate_state(st)
         if _verr:
             return _die("合并结果复验失败（改 delta 后重跑同一份 commit）：" + "；".join(_verr))
@@ -570,6 +580,22 @@ def _existing_chapters(project: Path) -> list[int]:
     return sorted(out)
 
 
+def _rollback_moves(moved: list[tuple[Path, Path]]) -> tuple[int, int]:
+    """把已归档文件移回原位；原位已被占用则留在归档区（绝不覆盖）。返回 (回滚数, 未回滚数)。"""
+    back = stuck = 0
+    for src, target in reversed(moved):
+        try:
+            if src.exists():
+                stuck += 1
+                continue
+            src.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(target), str(src))
+            back += 1
+        except OSError:
+            stuck += 1
+    return back, stuck
+
+
 def cmd_migrate(project: Path, apply: bool) -> int:
     mem = project / "记忆系统"
     if not mem.is_dir():
@@ -626,19 +652,34 @@ def cmd_migrate(project: Path, apply: bool) -> int:
     errs = validate_state(st)
     if errs:
         return _die("草案校验失败：" + "；".join(errs))
-    # 归档（只移动、永不删除）
-    moved: list[str] = []
+    # 归档（只移动、永不删除）：先全量预检冲突再动手；任一移动/写盘失败即回滚，避免半迁移
+    plan: list[tuple[Path, Path]] = []
     for o in olds:
         rel = o.relative_to(mem)
         target = mem / ARCHIVE_ROOT / rel
-        target.parent.mkdir(parents=True, exist_ok=True)
         if target.exists():
-            return _die(f"归档目标已存在（先人工处理）：{target}")
-        shutil.move(str(o), str(target))
-        moved.append(target.relative_to(project).as_posix())
-    write_state(project, st)
-    views = state_render.render_views(st)
-    state_render.write_views(project, views)
+            return _die(f"归档目标已存在（先人工处理）：{target}（未移动任何文件）")
+        plan.append((o, target))
+    moved: list[tuple[Path, Path]] = []
+    wrote_state = False
+    try:
+        for o, target in plan:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(o), str(target))
+            moved.append((o, target))
+        write_state(project, st)
+        wrote_state = True
+        views = state_render.render_views(st)
+        state_render.write_views(project, views)
+    except Exception as exc:  # noqa: BLE001 —— 归档/渲染/写盘任一步失败都要回滚，保留可重试状态
+        if wrote_state:
+            try:
+                state_path(project).unlink()
+            except OSError:
+                pass
+        back, stuck = _rollback_moves(moved)
+        return _die(f"migrate --apply 失败：{exc}；已回滚 {back} 个归档文件"
+                    + (f"，{stuck} 个因原位被占未回滚（原件保留在 {ARCHIVE_ROOT.as_posix()}/）" if stuck else ""))
     draft_path.unlink()
     print(f"✅ migrate --apply 完成：{STATE_REL.as_posix()}（revision=0，last_committed_chapter={st['last_committed_chapter']}）")
     print(f"   归档旧文件 {len(moved)} 个 → {ARCHIVE_ROOT.as_posix()}/（只移动、未删除）")

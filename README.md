@@ -5,13 +5,31 @@
 
 面向 AI Agent 的全流程长篇小说创作技能。从书名生成到千章完稿，配备三大自动系统（记忆系统/强约束/叙事质量管理）确保长篇连贯性。支持 AI 全自动和分步引导双模式。
 
-## ⚠️ 使用前必读（先看这里）
+## 安装（按宿主选一条）
 
-本技能是**内容包**：加载后是否被严格执行，取决于宿主 agent 的 system prompt。**直接把仓库加载为技能就开写，agent 很可能会自由发挥、跳过流程，体验大打折扣。**请按以下三步使用：
+**Hermes Agent**（自带 skills 机制，推荐）：
 
-1. **配置 system prompt**：将仓库根目录的 [system_prompt.md](system_prompt.md) 整段复制，配置为宿主软件的 system prompt（Claude Code / Cursor / API 接入 / Dify·Coze 等均适用，该文件顶部有各平台用法说明）
-2. **加载技能**：将本仓库作为技能/上下文加载
-3. **开始创作**：说「写小说」「继续」或任一触发词，技能会按场景路由引导
+```bash
+git clone https://github.com/Fly143/ultimate-novel-creation-skill.git \
+  "$LOCALAPPDATA/hermes/skills/ultimate-novel-creation-skill"     # Windows
+# macOS / Linux：~/.hermes/skills/ultimate-novel-creation-skill
+```
+
+重启会话 → `/skills` 里能看到「全能小说作家」→ 说「写小说」即可。
+
+**Claude Code / Cursor 等支持 `SKILL.md` 的宿主**：把仓库放进该宿主的 skills 目录，无需其它步骤。
+
+**只有对话框的宿主（纯 API / Dify / Coze / 网页版）**：没有技能机制，只能用 `system_prompt.md` 当 system prompt（脚本无法执行，字数/指纹/客观核验类步骤需人工代替）。
+
+安装校验：在空目录说「写小说」，能生成书名并落立项单即正常；无反应或 agent 自由发挥 → 见下节。
+
+## ⚠️ 使用前必读
+
+本技能是**内容包**：加载后是否被严格执行，取决于宿主 agent 能否按流程调用文件与脚本。
+
+1. **有 skills 机制**（Hermes / Claude Code / Cursor）：装完即可，`system_prompt.md` 不需要额外配置。
+2. **只有 system prompt**（API / Dify / Coze / 网页版）：把仓库根目录的 [system_prompt.md](system_prompt.md) 整段复制为 system prompt（该文件顶部有各平台用法说明）。
+3. **开始创作**：说「写小说」「继续」或任一触发词，技能会按场景路由引导。
 
 > 所有流程约束（强制执行协议、写后流水线、记忆系统维护等）都以技能文件为准；system prompt 只负责让宿主 agent 强制遵守它们。
 
@@ -279,14 +297,14 @@ v9.6.0 写后流水线要点：
 ## 项目结构（本技能仓库）
 
 ```
-├── LICENSE / NOTICE       # MIT 许可 + OpenFic Apache-2.0 出处署名（NOTICE 随载荷入包）
+├── LICENSE / NOTICE / THIRD-PARTY-LICENSES.txt   # MIT 主体 + OpenFic Apache-2.0 出处署名与许可全文（三者均随载荷入包）
 ├── .github/specs/        # 管线门禁规格（zhuque-human-and-pipeline-gates.md，随 .github 仅开发侧）
 ├── SKILL.md              # 技能入口 + 路径约定
 ├── system_prompt.md      # 宿主 system prompt（强制 agent 遵守流程，使用前必配）
 ├── modules/              # 33 个模块文件（28 功能模块 + 2 拆分执行规格 03_26B/C + 3 核心协议/规范 00/01/02）
 ├── references/           # 14+3 个精选写作参考（含 rulesets/ 规则集子目录）
 ├── templates/            # 19+3 个输出模板（含 constraints/ 约束模板子目录；含章节任务书模板）
-├── scripts/              # 指纹（py/pwsh 同口径；perl 为降级路径近似口径——均值舍入（半入 vs 银行家舍入）、段落仅按换行切（`\v`/`\f`/裸 `\r` 不切，段落偏宽）、字数长度口径（非 BMP 字符按码点计而非 UTF-16 码元））/ 词频统计（wordfreq.byte.pl 单实现，无 perl 时主观目测降级）/ 伏笔时间线（foreshadow_timeline py/ps1 双实现）+ 章节 .done 客观核验（check-done.py/ps1）+ 状态单真源（state_commit.py/ps1 + state_render.py）+ AI 味启发式检测（detect_ai_text.py/ps1 + ai-tells.txt）+ 正文指纹/手改保护（text_guard.py/ps1）+ 发布包打包校验（package_skill.py/ps1）+ 热路径文档预算守卫（doc-budget.json + check-doc-budget.py/ps1）+ 旧项目路径迁移（migrate_memory_paths.ps1 单实现，随 release Assets 分发）
+├── scripts/              # 指纹（py/pwsh 同口径；perl 为降级路径近似口径——均值舍入（半入 vs 银行家舍入）、段落仅按换行切（`\v`/`\f`/裸 `\r` 不切，段落偏宽）、字数长度口径（非 BMP 字符按码点计而非 UTF-16 码元））/ 词频统计（wordfreq.byte.pl 单实现，无 perl 时主观目测降级）/ 伏笔时间线（foreshadow_timeline py/ps1 双实现）+ 章节 .done 客观核验（check-done.py/ps1）+ 状态单真源（state_commit.py/ps1 + state_render.py）+ AI 味启发式检测（detect_ai_text.py/ps1 + ai-tells.txt）+ 正文指纹/手改保护（text_guard.py/ps1）+ 发布包打包校验（package_skill.py/ps1）+ 热路径文档预算守卫（doc-budget.json + check-doc-budget.py/ps1）+ 旧项目路径迁移（migrate_memory_paths.ps1 单实现，随仓库/发布包分发）
 ├── .github/              # 维护者工具：workflows/audit.yml + scripts/audit.ps1 + SMOKE_TEST.md + specs/（开发规格，不进 skill 运行时）
 └── memory-system/        # 记忆系统模板（skill 内只读，中英对照见 SKILL.md）
     ├── bible/            # 故事圣经 → 故事圣经/人物弧线/剧情时间线/伏笔清单/角色数据库
@@ -318,12 +336,8 @@ v9.6.0 写后流水线要点：
 
 ## 快速开始
 
-将本仓库作为 AI Agent 的技能加载。Agent 加载后自动读取 `SKILL.md` 及相关模块。
-
-用户输入「写小说」即可触发完整创作流程。长篇连载自动启用记忆系统。
-
-在第三方软件（Claude Code / Cursor / API 接入 / Dify·Coze 等）中使用时，可将 `system_prompt.md` 配置为该软件的 system prompt，确保宿主 agent 严格按技能执行、不自由发挥。
+装好后（见「安装」节）直接说「写小说」即可触发完整创作流程，长篇连载自动启用记忆系统。
 
 ## 声明
 
-本技能所有内容均由 AI 生成，不含任何人工编写，望周知！
+本技能主体内容由 AI 生成；第三方移植/引用内容及其许可见 `NOTICE` 与 `THIRD-PARTY-LICENSES.txt`。

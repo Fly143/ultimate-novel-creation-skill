@@ -943,8 +943,15 @@ def _run(results: list[bool]) -> int:
             subprocess.run([PY, str(PKG_PY), "--out", str(_out), "--root", str(ROOT)], capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
             _h.append(_hashlib.sha256(_out.read_bytes()).hexdigest())
         _names = _zipfile.ZipFile(_pkg_dir / "p0.zip").namelist()
-        results.append(case("[pkg] zip 确定性（两次 sha 一致）且载荷含 SKILL.md、无 .github/.agents", True,
-                            _h[0] == _h[1] and "SKILL.md" in _names and not any(n.startswith((".github", ".agents")) for n in _names)))
+        _need = ["SKILL.md", "LICENSE", "NOTICE", "THIRD-PARTY-LICENSES.txt"] + [
+            "memory-system/" + _p for _p in (
+                "bible/story_bible.md", "bible/character_arcs.md", "bible/plot_timeline.md",
+                "bible/chekhovs_gun.md", "bible/character_database.md",
+                "summaries/_template.md", "phases/_template.md", "volumes/_template.md")]
+        _miss = [n for n in _need if n not in _names]
+        results.append(case("[pkg] zip 确定性（两次 sha 一致）且载荷含运行时必需集（含 memory-system 8 模板）、无 .github/.agents", True,
+                            _h[0] == _h[1] and not _miss and not any(n.startswith((".github", ".agents")) for n in _names),
+                            f"缺 {_miss} | 载荷 {len(_names)}"))
     except Exception as exc:  # noqa: BLE001
         results.append(case("[段:技能发布包] 段内 setup/断言异常（登记 FAIL，后续段继续）", True, False,
                             f"{type(exc).__name__}: {exc}"))
@@ -1677,6 +1684,47 @@ def _run(results: list[bool]) -> int:
                            f"| apply归档行={[l for l in _o2_m.splitlines() if '归档旧文件' in l]} "
                            f"| md树={_arc_tree}")
         results.append(case(f"[🔴回归] migrate 归档白名单 → 角色数据库保留原位、派生件归档后重渲染 [{_e_mig}]", True, _mig_cond, _mig_detail))
+
+    # w2) migrate --apply 归档冲突：预检中止、不移动任何文件（🔴 回归：半途归档曾导致圣经被移走且不可重试）
+    def _mig_conflict_ok(engine):
+        proj = _mig_setup(f"p_migc_{engine}")
+        arc = proj / "记忆系统" / "_旧存档" / "摘要"
+        arc.mkdir(parents=True, exist_ok=True)
+        (arc / "第001章摘要.md").write_text("OLD", encoding="utf-8")
+        _mig_run(engine, proj, False)
+        rc, out = _mig_run(engine, proj, True)
+        bible = proj / "记忆系统" / "圣经"
+        return (rc == 1 and "已存在" in out and "未移动任何文件" in out
+                and (bible / "故事圣经.md").is_file()
+                and (proj / "记忆系统" / "摘要" / "第001章摘要.md").is_file()
+                and not (proj / "记忆系统" / "_state.json").exists())
+    for _e_mc in ENGINES:
+        try:
+            _mc_cond, _mc_detail = bool(_mig_conflict_ok(_e_mc)), ""
+        except Exception as _exc:  # noqa: BLE001
+            _mc_cond, _mc_detail = False, f"{type(_exc).__name__}: {_exc}"
+        results.append(case(f"[🔴回归] migrate --apply 归档冲突 → 预检中止、未移动任何文件 [{_e_mc}]", True, _mc_cond, _mc_detail))
+
+    # w3) commit 幂等：同章重复提交不重复追加 facts/timeline（🔴 回归：03_26 失败处置要求重跑同一份事务）
+    def _idem_ok(engine):
+        proj = _nhd / f"p_idem_{engine}"
+        proj.mkdir(parents=True, exist_ok=True)
+        run_state(engine, "init", "--project", str(proj))
+        for _i in range(2):
+            run_state(engine, "draft", "--project", str(proj), "--chapter", "1")
+            txn = write_txn(proj, 1, chapter_delta(1, "甲"))
+            _c, _o = run_state(engine, "commit", "--project", str(proj), "--chapter", "1", "--input", str(txn))
+            if _c != 0:
+                return False
+        st = json.loads((proj / "记忆系统" / "_state.json").read_text(encoding="utf-8"))
+        _c2, _ = run_state(engine, "check", "--project", str(proj))
+        return len(st["facts"]) == 1 and len(st["timeline"]["readers_known"]) == 1 and _c2 == 0
+    for _e_id in ENGINES:
+        try:
+            _id_cond, _id_detail = bool(_idem_ok(_e_id)), ""
+        except Exception as _exc:  # noqa: BLE001
+            _id_cond, _id_detail = False, f"{type(_exc).__name__}: {_exc}"
+        results.append(case(f"[🔴回归] 同章重复 commit → facts/timeline 不重复且 check 仍 PASS [{_e_id}]", True, _id_cond, _id_detail))
 
     # x) ch0 大纲种子提交：draft/commit --chapter 0 → 渲染真相时间线、不产生 .done 标记
     def _seed_ok(engine):
@@ -3731,14 +3779,19 @@ def _run(results: list[bool]) -> int:
     results.append(case("[三十五轮] foreshadow planted_ch 超日期上界 → 双引擎 rc1 同文案「超出日期换算上界」（不再裸 Overflow/AddDays 异常）", True,
                         all(v[0] == 1 and "超出日期换算上界" in v[1] for v in _rr49.values())
                         and len(set(_rr49.values())) == 1))
-    # d46⑤ NOTICE 入包 → 双引擎载荷 100 且清单含 NOTICE
+    # d46⑤ NOTICE 入包 → 双引擎载荷含 NOTICE 且计数一致（memory-system 纳入后基数 109，不写死 100）
+    import re as _re46
     _pk46 = {}
     for _e46b, _cmd46b in (("py", [PY, str(ROOT / "scripts" / "package_skill.py"), "--check"]),
                            ("ps1", [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(ROOT / "scripts" / "package_skill.ps1"), "-Check"])):
         _pr46b = subprocess.run(_cmd46b, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"}, cwd=str(ROOT))
-        _pk46[_e46b] = (_pr46b.returncode, "载荷：100 个文件" in _decode(_pr46b.stdout), "NOTICE" in _decode(_pr46b.stdout))
-    results.append(case("[三十五轮] NOTICE 入包 → 双引擎载荷 100 文件且清单含 NOTICE（Apache-2.0 署名随包保留）", True,
-                        all(v[0] == 0 and v[1] and v[2] for v in _pk46.values())))
+        _o46b = _decode(_pr46b.stdout)
+        _m46b = _re46.search(r"载荷：(\d+) 个文件", _o46b)
+        _pk46[_e46b] = (_pr46b.returncode, int(_m46b.group(1)) if _m46b else -1, "NOTICE" in _o46b)
+    results.append(case("[三十五轮] NOTICE 入包 → 双引擎载荷含 NOTICE 且计数一致（Apache-2.0 署名随包保留）", True,
+                        all(v[0] == 0 and v[2] for v in _pk46.values())
+                        and len({v[1] for v in _pk46.values()}) == 1
+                        and all(v[1] >= 100 for v in _pk46.values())))
 
 
     # === 三十六轮修复回归组（短路径根前缀归一 / migrate fail-fast / Ordinal 排序） ===

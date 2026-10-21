@@ -453,17 +453,44 @@ function Merge-DeepObject {
     }
 }
 
+function Test-EntryEqual {
+    # 条目相等（facts/timeline 去重）：字符串按值；对象按压缩 JSON 逐字比较（对齐 py == 语义）
+    param($A, $B)
+    if ($null -eq $A -or $null -eq $B) { return ($null -eq $A -and $null -eq $B) }
+    if ($A -is [string] -or $B -is [string]) { return ([string]$A -ceq [string]$B) }
+    return ((ConvertTo-Json -InputObject $A -Depth 20 -Compress) -ceq (ConvertTo-Json -InputObject $B -Depth 20 -Compress))
+}
+
 function Merge-Delta {
-    param($State, $Delta)
+    param($State, $Delta, $Chapter)
     foreach ($p in $Delta.PSObject.Properties) {
         $key = $p.Name; $val = $p.Value
         if ($key -eq 'facts') {
-            $cur = @($State.facts) + @($val)
-            $State.facts = @($cur)
+            # 同章重跑=替换该章条目（commit 幂等；否则 03_26「重跑同一份 commit」会成倍重复）
+            $keep = @()
+            $hasChapter = $null -ne $Chapter
+            foreach ($e in @($State.facts)) {
+                $same = $false
+                if ($hasChapter -and $e -is [pscustomobject] -and $null -ne $e.PSObject.Properties['chapter']) {
+                    $same = ([long]$e.chapter -eq [long]$Chapter)
+                }
+                if (-not $same) { $keep += $e }
+            }
+            foreach ($e in @($val)) {
+                $dup = $false
+                foreach ($k in $keep) { if (Test-EntryEqual -A $k -B $e) { $dup = $true; break } }
+                if (-not $dup) { $keep += $e }
+            }
+            $State.facts = @($keep)
         }
         elseif ($key -eq 'timeline' -and $null -ne $val) {
             foreach ($sub in $val.PSObject.Properties) {
-                $cur = @($State.timeline.($sub.Name)) + @($sub.Value)
+                $cur = @($State.timeline.($sub.Name))
+                foreach ($e in @($sub.Value)) {
+                    $dup = $false
+                    foreach ($k in $cur) { if (Test-EntryEqual -A $k -B $e) { $dup = $true; break } }
+                    if (-not $dup) { $cur += $e }
+                }
                 Set-NoteProperty -Obj $State.timeline -Name ([string]$sub.Name) -Value @($cur)
             }
         }
@@ -660,7 +687,7 @@ switch ($Command) {
                 Write-Output ('❌ stale transaction（锁内复核）：expected={0} actual={1}' -f [long]$txn.expected_state_revision, [long]$st.state_revision)
                 exit 1
             }
-            $st = Merge-Delta -State $st -Delta $txn.delta
+            $st = Merge-Delta -State $st -Delta $txn.delta -Chapter $Chapter
             $verr2 = Test-StateSchema $st
             if ($verr2.Count) { Write-Output ('❌ 合并结果复验失败（改 delta 后重跑同一份 commit）：{0}' -f ($verr2 -join '；')); exit 1 }
             $st.state_revision = [long]$st.state_revision + 1
@@ -833,19 +860,53 @@ else {
         $st = Get-Content -LiteralPath $draftPath -Raw -Encoding UTF8 | ConvertFrom-Json
         $errs = Test-StateSchema $st
         if ($errs.Count) { Write-Output ('❌ 草案校验失败：{0}' -f ($errs -join '；')); exit 1 }
-        $moved = 0
+        # 1) 全量预检冲突：任一目标已存在即中止，不动任何文件（半途归档不可恢复的回归）
+        $plan = @()
         foreach ($o in $olds) {
             $rel = Get-RelPath $mem $o
             $target = Join-Path (Join-Path $mem $ArchiveDirName) ($rel -replace '/', [string][char]92)
-            $tDir = Split-Path -Parent $target
-            if (-not (Test-Path -LiteralPath $tDir)) { New-Item -ItemType Directory -Path $tDir -Force | Out-Null }
-            if (Test-Path -LiteralPath $target) { Write-Output ('❌ 归档目标已存在（先人工处理）：{0}' -f $target); exit 1 }
-            Move-Item -LiteralPath $o -Destination $target
-            $moved++
+            if (Test-Path -LiteralPath $target) { Write-Output ('❌ 归档目标已存在（先人工处理）：{0}（未移动任何文件）' -f $target); exit 1 }
+            $plan += [pscustomobject]@{ Src = $o; Target = $target }
         }
-        Write-StateFile -Project $ProjectPath -State $st
-        $views = Get-DerivedViews $st
-        $n = Write-DerivedViews -Project $ProjectPath -Views $views
+        # 2) 逐项移动 + 任一步失败即回滚（撤 state、把已归档文件移回原位；绝不覆盖）
+        $movedPairs = @()
+        $wroteState = $false
+        $views = $null
+        $n = 0
+        $step = '归档旧文件'
+        try {
+            foreach ($p in $plan) {
+                $step = '归档 ' + (Get-RelPath $mem $p.Src)
+                $tDir = Split-Path -Parent $p.Target
+                if (-not (Test-Path -LiteralPath $tDir)) { New-Item -ItemType Directory -Path $tDir -Force | Out-Null }
+                Move-Item -LiteralPath $p.Src -Destination $p.Target
+                $movedPairs += $p
+            }
+            $step = '写入 _state.json'
+            Write-StateFile -Project $ProjectPath -State $st
+            $wroteState = $true
+            $step = '渲染派生视图'
+            $views = Get-DerivedViews $st
+            $n = Write-DerivedViews -Project $ProjectPath -Views $views
+        } catch {
+            $back = 0; $stuck = 0
+            if ($wroteState) { Remove-Item -LiteralPath (Join-Path $ProjectPath $StateRel) -Force -ErrorAction SilentlyContinue }
+            for ($i = $movedPairs.Count - 1; $i -ge 0; $i--) {
+                $pp = $movedPairs[$i]
+                try {
+                    if (Test-Path -LiteralPath $pp.Src) { $stuck++; continue }
+                    $sDir = Split-Path -Parent $pp.Src
+                    if (-not (Test-Path -LiteralPath $sDir)) { New-Item -ItemType Directory -Path $sDir -Force | Out-Null }
+                    Move-Item -LiteralPath $pp.Target -Destination $pp.Src
+                    $back++
+                } catch { $stuck++ }
+            }
+            $tail = ''
+            if ($stuck -gt 0) { $tail = ('，{0} 个因原位被占未回滚（原件保留在 {1}/）' -f $stuck, $ArchiveDirName) }
+            Write-Output ('❌ migrate -Apply 失败（{0}）：{1}；已回滚 {2} 个归档文件{3}' -f $step, $_.Exception.Message, $back, $tail)
+            exit 1
+        }
+        $moved = $movedPairs.Count
         Remove-Item -LiteralPath $draftPath -Force -ErrorAction SilentlyContinue
         Write-Output ('✅ migrate -Apply 完成：{0}（revision=0，last_committed_chapter={1}）' -f $StateRel, [long]$st.last_committed_chapter)
         Write-Output ('   归档旧文件 {0} 个 → {1}/（只移动、未删除）' -f $moved, $ArchiveDirName)

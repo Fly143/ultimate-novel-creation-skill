@@ -1,4 +1,6 @@
-# 朱雀 AIGC 检测对策 + 去AI味修订指南
+# 朱雀 AIGC 检测对策
+
+> **来源与许可**：下篇「去AI味修订指南」经删改/重排/中文改写移植自 OpenFic（syrizelink/OpenFic，Apache License 2.0，原文件 `backend/app/skills/deslop-lexicon.yaml`、`deslop-writing.yaml`）；非原样复制，语义保留、表述与结构已调整。 + 去AI味修订指南
 
 > **双层结构**：上篇=朱雀检测机制对接（六大指标原理与统计层对策）；下篇=去AI味修订指南（**以 OpenFic deslop 体系为主移植**：禁用词表 / 7 Gate / 10 模式 / 三遍法 / 删除上限）。
 > **配套**：`templates/朱雀去AI化检查清单.md` 是操作清单（统计层脚本对接 + 7 Gate 快查 + 人工为主协议）；本文件是原理与完整修订规则。

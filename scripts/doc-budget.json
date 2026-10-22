@@ -8,9 +8,9 @@
     "度量单位=Unicode 码点数（Python len() / .NET 需减代理对；emoji 等非 BMP 字符记 1）。读取=UTF-8 字节解码剥 BOM + 换行归一化为 \\n。"
   ],
   "baseline": {
-    "measured_on": "2026-10-21",
+    "measured_on": "2026-10-22",
     "machine": "Windows 11 / PowerShell 5.1 与 pwsh 7.4（便携版 pwsh 需入 PATH，具体路径见维护者本地环境）双环境实跑一致；pwsh7 侧读数由套件 env1 链每轮复跑",
-    "worst_path_chars": 48241,
+    "worst_path_chars": 48318,
     "writer_delegated_chars": 23451,
     "session_resident_chars": 29916,
     "precheck_path_chars": 24488,
@@ -98,8 +98,8 @@
     },
     {
       "path": "templates/朱雀去AI化检查清单.md",
-      "budget": 5471,
-      "why": "朱雀人工证据包协议；2026-10-21 实测 5,161，预算 5,471（余量 310 = 5.7%）；调额史见 git log -p scripts/doc-budget.json",
+      "budget": 5550,
+      "why": "朱雀人工证据包协议；2026-10-21 实测 5,238，预算 5,550（含来源与许可注记）；调额史见 git log -p scripts/doc-budget.json",
       "layer": "protected"
     },
     {

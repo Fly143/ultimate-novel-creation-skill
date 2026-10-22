@@ -106,7 +106,7 @@ if($StrictOrphan){
   # 旧版用「裸文件名是否出现在任意文档」判定，会被与项目侧产物同名的裸名（如 进度看板.md、
   # 创作状态追踪表.md）骗过而漏报——那类模板名字在仓库里到处都是，却可能无人真正引用。
   $orphans = @()
-  $docRoots = @('README.md','LICENSE','.gitignore','SKILL.md','system_prompt.md','CHANGELOG.md','THIRD-PARTY-LICENSES.txt')
+  $docRoots = @('README.md','.gitignore','SKILL.md','system_prompt.md')
   # 可解析资产清单（排除 .git）
   $allFiles = Get-ChildItem -Recurse -File -LiteralPath $Root | ForEach-Object { $_.FullName.Substring($Root.Length+1) -replace '\\','/' }
   $assetSet = @{}; foreach($a in $allFiles){ if($a -notlike '.git/*'){ $assetSet[$a] = $true } }   # 可解析资产（.git 除外）
@@ -137,7 +137,7 @@ if($StrictOrphan){
   # 兼容版（默认）：文件名出现在任意文档中即视为已引用
   $orphans = @()
   foreach($f in $files){
-    if($f -match '^(README|LICENSE|\.gitignore)'){ continue }
+    if($f -match '^(README|\.gitignore)'){ continue }
     if($f -like '.github/*'){ continue }   # .github/ 为维护者工具/文档，无需被 skill 内容引用
     $base = [System.IO.Path]::GetFileName($f); $fwd = $f -replace '\\','/'
     $hits = 0

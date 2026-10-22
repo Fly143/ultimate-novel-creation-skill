@@ -18,7 +18,7 @@ try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catc
 $wsChars = [char[]]@(0x09,0x0a,0x0b,0x0c,0x0d,0x1c,0x1d,0x1e,0x1f,0x20,0x85,0xa0,0x1680,0x2000,0x2001,0x2002,0x2003,0x2004,0x2005,0x2006,0x2007,0x2008,0x2009,0x200a,0x2028,0x2029,0x202f,0x205f,0x3000)
 
 $includeDirs = @('modules', 'templates', 'references', 'scripts', 'memory-system')  # memory-system=项目初始化模板源（03_01 步骤8.2）
-$IncludeFiles = @("SKILL.md", "system_prompt.md", "LICENSE", "NOTICE", "THIRD-PARTY-LICENSES.txt")  # NOTICE+THIRD-PARTY-LICENSES=Apache-2.0 §4(a)(b) 随包义务（与 py 同步）
+$IncludeFiles = @("SKILL.md", "system_prompt.md")  # 与 py 同步
 $required = @('name', 'description', 'version')
 
 $skillPath = Join-Path $Root 'SKILL.md'

@@ -945,13 +945,13 @@ def _run(results: list[bool]) -> int:
             subprocess.run([PY, str(PKG_PY), "--out", str(_out), "--root", str(ROOT)], capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
             _h.append(_hashlib.sha256(_out.read_bytes()).hexdigest())
         _names = _zipfile.ZipFile(_pkg_dir / "p0.zip").namelist()
-        _need = ["SKILL.md", "LICENSE", "NOTICE", "THIRD-PARTY-LICENSES.txt"] + [
+        _need = ["SKILL.md", "system_prompt.md"] + [
             "memory-system/" + _p for _p in (
                 "bible/story_bible.md", "bible/character_arcs.md", "bible/plot_timeline.md",
                 "bible/chekhovs_gun.md", "bible/character_database.md",
                 "summaries/_template.md", "phases/_template.md", "volumes/_template.md")]
         _miss = [n for n in _need if n not in _names]
-        results.append(case("[pkg] zip 确定性（两次 sha 一致）且载荷含运行时必需集（含 memory-system 8 模板）、无 .github/.agents", True,
+        results.append(case("[pkg] zip 确定性（两次 sha 一致）且载荷含运行时必需集（含 memory-system 8 模板）、无 .github", True,
                             _h[0] == _h[1] and not _miss and not any(n.startswith((".github", ".agents")) for n in _names),
                             f"缺 {_miss} | 载荷 {len(_names)}"))
     except Exception as exc:  # noqa: BLE001
@@ -3864,7 +3864,7 @@ def _run(results: list[bool]) -> int:
     results.append(case("[三十五轮] foreshadow planted_ch 超日期上界 → 双引擎 rc1 同文案「超出日期换算上界」（不再裸 Overflow/AddDays 异常）", True,
                         all(v[0] == 1 and "超出日期换算上界" in v[1] for v in _rr49.values())
                         and len(set(_rr49.values())) == 1))
-    # d46⑤ NOTICE 入包 → 双引擎载荷含 NOTICE 且计数一致（memory-system 纳入后基数 109，不写死 100）
+    # d46⑤ 载荷计数 → 双引擎一致且含 SKILL.md（内存系统纳入后基数随文件数变化，不写死）
     import re as _re46
     _pk46 = {}
     for _e46b, _cmd46b in (("py", [PY, str(ROOT / "scripts" / "package_skill.py"), "--check"]),
@@ -3872,8 +3872,8 @@ def _run(results: list[bool]) -> int:
         _pr46b = subprocess.run(_cmd46b, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"}, cwd=str(ROOT))
         _o46b = _decode(_pr46b.stdout)
         _m46b = _re46.search(r"载荷：(\d+) 个文件", _o46b)
-        _pk46[_e46b] = (_pr46b.returncode, int(_m46b.group(1)) if _m46b else -1, "NOTICE" in _o46b)
-    results.append(case("[三十五轮] NOTICE 入包 → 双引擎载荷含 NOTICE 且计数一致（Apache-2.0 署名随包保留）", True,
+        _pk46[_e46b] = (_pr46b.returncode, int(_m46b.group(1)) if _m46b else -1, "SKILL.md" in _o46b)
+    results.append(case("[三十五轮] 载荷清单 → 双引擎计数一致且含 SKILL.md", True,
                         all(v[0] == 0 and v[2] for v in _pk46.values())
                         and len({v[1] for v in _pk46.values()}) == 1
                         and all(v[1] >= 100 for v in _pk46.values())))

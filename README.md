@@ -2,10 +2,8 @@
 
 本技能是**内容包**：加载后是否被严格执行，取决于宿主 agent 能否按流程调用文件与脚本。
 
-1. **有 skills 机制**（Hermes / Claude Code / Cursor）：装完即可，`system_prompt.md` 不需要额外配置。
-2. **只有 system prompt**（API / Dify / Coze / 网页版）：把仓库根目录的 [system_prompt.md](system_prompt.md) 整段复制为 system prompt（该文件顶部有各平台用法说明）。
-3. **开始创作**：说「写小说」「继续」或任一触发词，技能会按场景路由引导。
-
+1. 把仓库根目录的 [system_prompt.md](system_prompt.md) 整段复制为 system prompt。
+2. **开始创作**：说「写小说」「继续」或任一触发词，技能会按场景路由引导。
 > 所有流程约束（强制执行协议、写后流水线、记忆系统维护等）都以技能文件为准；system prompt 只负责让宿主 agent 强制遵守它们。
 
 > - **冲突怎么判**：优先级裁决链 `用户要求 > 硬门禁 > 项目约束 > skill 流程 > reference`，见 [modules/00_强制执行协议.md](modules/00_强制执行协议.md) 顶部；跳过硬门禁须用户书面确认，朱雀不接受口头解除。

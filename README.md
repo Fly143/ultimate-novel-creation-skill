@@ -1,32 +1,3 @@
-# 全能小说作家
-
-[![Version](https://img.shields.io/badge/version-9.6.1-blue)](https://github.com/Fly143/ultimate-novel-creation-skill)
-
-面向 AI Agent 的全流程长篇小说创作技能。从书名生成到千章完稿，配备三大自动系统（记忆系统/强约束/叙事质量管理）确保长篇连贯性。支持 AI 全自动和分步引导双模式。
-
-## 目录
-
-- [安装](#安装按宿主选一条) · [使用前必读](#-使用前必读) · [四大场景入口](#四大场景入口) · [28 大功能模块总表](#28-大功能模块总表)
-- [记忆系统](#记忆系统) · [写后流水线](#写后流水线) · [项目结构](#项目结构本技能仓库) · [核心能力](#核心能力) · [声明](#声明)
-
-## 安装（按宿主选一条）
-
-**Hermes Agent**（自带 skills 机制，推荐）：
-
-```bash
-git clone https://github.com/Fly143/ultimate-novel-creation-skill.git \
-  "$LOCALAPPDATA/hermes/skills/ultimate-novel-creation-skill"     # Windows
-# macOS / Linux：~/.hermes/skills/ultimate-novel-creation-skill
-```
-
-重启会话 → `/skills` 里能看到「全能小说作家」→ 说「写小说」即可。
-
-**Claude Code / Cursor 等支持 `SKILL.md` 的宿主**：把仓库放进该宿主的 skills 目录，无需其它步骤。
-
-**只有对话框的宿主（纯 API / Dify / Coze / 网页版）**：没有技能机制，只能用 `system_prompt.md` 当 system prompt（脚本无法执行，字数/指纹/客观核验类步骤需人工代替）。
-
-安装校验：在空目录说「写小说」，能生成书名并落立项单即正常；无反应或 agent 自由发挥 → 见下节。
-
 ## ⚠️ 使用前必读
 
 本技能是**内容包**：加载后是否被严格执行，取决于宿主 agent 能否按流程调用文件与脚本。
@@ -348,7 +319,3 @@ v9.6.0 写后流水线要点：
 ## 快速开始
 
 装好后（见「安装」节）直接说「写小说」即可触发完整创作流程，长篇连载自动启用记忆系统。
-
-## 声明
-
-本技能主体内容由 AI 生成；个别章节的内容移植来源与许可，见对应文件头部的「来源与许可」注记。

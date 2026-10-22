@@ -163,8 +163,9 @@ if (-not (Test-Path -LiteralPath (Join-Path $Root 'README.md') -PathType Leaf)) 
 }
 $readmeContent = [System.IO.File]::ReadAllText((Join-Path $Root 'README.md'), $enc)
 if($readmeContent -match 'version-([0-9]+\.[0-9]+\.[0-9]+)-blue'){ $readmeVer = $Matches[1] }
-if($skillVer -eq '' -or $readmeVer -eq ''){ $errors += "版本号解析失败：SKILL=$skillVer README=$readmeVer" }
-elseif($skillVer -ne $readmeVer){ $errors += "版本号不一致：SKILL.md=$skillVer vs README徽章=$readmeVer" }
+if($skillVer -eq ''){ $errors += "版本号解析失败：SKILL.md 缺 version 字段" }
+elseif($readmeVer -ne '' -and $skillVer -ne $readmeVer){ $errors += "版本号不一致：SKILL.md=$skillVer vs README徽章=$readmeVer" }
+# README 未放版本徽章时不校验（README 允许精简，版本权威=SKILL.md）
 
 # ---------- ④ 残留英文路径 token（项目侧）----------
 
@@ -352,7 +353,7 @@ if($errors.Count){
   $orphanNote = if($StrictOrphan){ "孤儿 0（收紧判定）" } else { "孤儿 0（兼容判定）" }
   $orderNote = if($LintOrder){ " / 写后顺序一致" } else { "" }
   $budgetNote = if($LintBudget){ " / 文档预算 PASS" } else { "" }
-  Write-Output "✅ 审计全部通过：死引用 0 / $orphanNote / 版本一致($skillVer) / 无残留英文路径$orderNote$budgetNote"
+  Write-Output "✅ 审计全部通过：死引用 0 / $orphanNote / 版本=$skillVer / 无残留英文路径$orderNote$budgetNote"
   if($warns.Count){ Write-Output ""; Write-Output "⚠️ 警告 $warnGroups 组（不阻断）："; $warns | ForEach-Object { Write-Output $_ } }
   exit 0
 }

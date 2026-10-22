@@ -284,7 +284,6 @@ v9.6.0 写后流水线要点：
 │   ├── 手改保护          text_guard.py|.ps1（digest/verify/verify-all，账本 .story/text-digests.json）
 │   ├── AI 味启发式        detect_ai_text.py|.ps1 + ai-tells.txt（不门禁）
 │   ├── 伏笔时间线        foreshadow_timeline.py|.ps1（派生件，禁手改）
-│   ├── 预算守卫          check-doc-budget.py|.ps1 + doc-budget.json（热路径文档）
 │   ├── 发布包            package_skill.py|.ps1（--check 校验；确定性 zip 仅 py 产出）
 │   └── 旧项目迁移        migrate_memory_paths.ps1（单实现；预览默认，-Apply 才动手）
 ├── .github/              # 仅 CI：workflows/audit.yml + scripts/audit.ps1 + scripts/test-check-done.py

@@ -303,7 +303,6 @@ v9.6.0 写后流水线要点：
 
 ```
 ├── LICENSE / NOTICE / THIRD-PARTY-LICENSES.txt   # MIT 主体 + OpenFic Apache-2.0 出处署名与许可全文（三者均随载荷入包）
-├── .github/specs/        # 管线门禁规格（zhuque-human-and-pipeline-gates.md，随 .github 仅开发侧）
 ├── SKILL.md              # 技能入口 + 路径约定
 ├── system_prompt.md      # 宿主 system prompt（强制 agent 遵守流程，使用前必配）
 ├── modules/              # 33 个模块文件（28 功能模块 + 2 拆分执行规格 03_26B/C + 3 核心协议/规范 00/01/02）
@@ -319,7 +318,7 @@ v9.6.0 写后流水线要点：
 │   ├── 预算守卫          check-doc-budget.py|.ps1 + doc-budget.json（热路径文档）
 │   ├── 发布包            package_skill.py|.ps1（--check 校验；确定性 zip 仅 py 产出）
 │   └── 旧项目迁移        migrate_memory_paths.ps1（单实现；预览默认，-Apply 才动手）
-├── .github/              # 维护者工具：workflows/audit.yml + scripts/audit.ps1 + SMOKE_TEST.md + specs/（开发规格，不进 skill 运行时）
+├── .github/              # 仅 CI：workflows/audit.yml + scripts/audit.ps1 + scripts/test-check-done.py
 └── memory-system/        # 记忆系统模板（skill 内只读，中英对照见 SKILL.md）
     ├── bible/            # 故事圣经 → 故事圣经/人物弧线/剧情时间线/伏笔清单/角色数据库
     ├── summaries/        # 单章摘要模板

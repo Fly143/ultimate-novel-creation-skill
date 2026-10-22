@@ -109,7 +109,7 @@ if($StrictOrphan){
   $docRoots = @('README.md','LICENSE','.gitignore','SKILL.md','system_prompt.md','CHANGELOG.md','THIRD-PARTY-LICENSES.txt')
   # 可解析资产清单（排除 .git）
   $allFiles = Get-ChildItem -Recurse -File -LiteralPath $Root | ForEach-Object { $_.FullName.Substring($Root.Length+1) -replace '\\','/' }
-  $assetSet = @{}; foreach($a in $allFiles){ if(($a -notlike '.git/*') -and ($a -notlike '.github/plans/*')){ $assetSet[$a] = $true } }   # 计划文档为过程记录，不按 skill 资产判孤儿
+  $assetSet = @{}; foreach($a in $allFiles){ if($a -notlike '.git/*'){ $assetSet[$a] = $true } }   # 可解析资产（.git 除外）
   # 引用前缀目录白名单（与 skill 资产目录一致）
   $strictDirs = @('modules','references','templates','memory-system','scripts','templates/constraints','references/rulesets')
   $strictDirsCn = @('模块','参考资源','模板','圣经','摘要','阶段','卷','约束')
@@ -127,7 +127,6 @@ if($StrictOrphan){
   foreach($f in $files){
     if($docRoots -contains $f){ continue }
     if($f -like '.github/*'){ continue }        # 维护者工具，无需被 skill 内容引用
-    if($f -like '.github/plans/*'){ continue }        # 计划文档为过程记录，不按资产判孤儿
     if(-not $refs.ContainsKey($f)){ $orphans += $f }
   }
   if($orphans.Count){
@@ -140,7 +139,6 @@ if($StrictOrphan){
   foreach($f in $files){
     if($f -match '^(README|LICENSE|\.gitignore)'){ continue }
     if($f -like '.github/*'){ continue }   # .github/ 为维护者工具/文档，无需被 skill 内容引用
-    if($f -like '.github/plans/*'){ continue }   # 计划文档为过程记录，不按资产判孤儿（与 -StrictOrphan 分支同口径）
     $base = [System.IO.Path]::GetFileName($f); $fwd = $f -replace '\\','/'
     $hits = 0
     foreach($k in $allText.Keys){ if($k -ne $fwd -and ($allText[$k].Contains($base) -or $allText[$k].Contains($fwd))){ $hits++ } }

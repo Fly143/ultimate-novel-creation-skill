@@ -1,0 +1,46 @@
+name: Bug 报告
+description: 流程跑不通、脚本报错、结果与文档不一致
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请先确认 `SKILL.md` 的 version 与 `git log -1` 一致，并贴出实际命令与输出。
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      description: SKILL.md 里的 version，或 `git rev-parse --short HEAD`
+      placeholder: 9.6.1 / 88a6c50
+    validations:
+      required: true
+  - type: dropdown
+    id: host
+    attributes:
+      label: 宿主
+      options: [Hermes Agent, Claude Code, Cursor, 纯 API / Dify / Coze, 其它]
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 从哪个触发词开始、走哪个模块、执行了哪条命令
+      placeholder: |
+        1. 说「继续」
+        2. 第 3 章写完后执行 `python scripts/state_commit.py commit ...`
+        3. 报错 ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望 vs 实际
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: 环境
+      description: 操作系统 / python 与 PowerShell 版本 / 是否新架构项目（有 `记忆系统/_state.json`）
+      placeholder: Windows 11 / python 3.12 / pwsh 7.4 / 新架构

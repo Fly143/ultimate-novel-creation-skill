@@ -464,19 +464,21 @@ function Acquire-Lock {
     $lock = Join-Path $Project ($LockRel -replace '/', [string][char]92)
     $dir = Split-Path -Parent $lock
     if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+    $warn = ''   # 接管告警经返回值带出（Write-Output 在函数内会被 $lk = 赋值吞掉，等同静默接管）
     foreach ($attempt in 1, 2) {
         try {
             $fs = [System.IO.File]::Open($lock, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write)
             $ts = [int][double]::Parse((Get-Date -UFormat %s))
             $bytes = [System.Text.Encoding]::UTF8.GetBytes(('{{ "pid": {0}, "ts": {1} }}' -f $PID, $ts))
             $fs.Write($bytes, 0, $bytes.Length); $fs.Close()
-            return @{ Lock = $lock; Ok = $true; Msg = 'ok' }
+            return @{ Lock = $lock; Ok = $true; Msg = 'ok'; Warn = $warn }
         }
         catch {
             $age = 0.0
             try { $age = ((Get-Date) - (Get-Item -LiteralPath $lock).LastWriteTime).TotalSeconds } catch { $age = 0 }
             if ($age -gt $LockStaleSeconds -and $attempt -eq 1) {
-                Write-Output ('⚠️ 发现 {0}s 以上的残留锁，接管（{1}）' -f $LockStaleSeconds, $lock)
+                # 不在此处输出（会被赋值吞掉）：带出到调用点打印，与 py 同文案
+                $warn = ('⚠️ 发现 {0}s 以上的残留锁，接管（{1}）' -f $LockStaleSeconds, $lock)
                 Remove-Item -LiteralPath $lock -Force -ErrorAction SilentlyContinue
                 continue
             }
@@ -728,6 +730,7 @@ switch ($Command) {
         }
         $lk = Acquire-Lock -Project $ProjectPath
         if (-not $lk.Ok) { Write-Output ('❌ 写入失败：{0}（修正环境后重跑同一份 commit，事务文件已保留）' -f $lk.Msg); exit 1 }
+        if ($lk.Warn) { Write-Output $lk.Warn }
         $commitOk = $false
         try {
         try {

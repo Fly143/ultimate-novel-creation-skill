@@ -37,7 +37,7 @@ $Root = (Get-Item -LiteralPath $Root).FullName.TrimEnd('\','/')  # Resolve-Path 
 
 # ---------- ① 死引用审计 ----------
 
-$files = Get-ChildItem -Recurse -File -LiteralPath $Root -Filter *.md | ForEach-Object { $_.FullName.Substring($Root.Length+1) -replace '\\','/' }
+$files = Get-ChildItem -Recurse -File -LiteralPath $Root -Filter *.md | ForEach-Object { $_.FullName.Substring($Root.Length+1) -replace '\\','/' }   # 维护者资料（原 .github/plans）不参与 skill 文档的引用/术语/跨度检查
 $fileSet = @{}; foreach($f in $files){ $fileSet[$f] = $true }
 $dirSet = @{}
 foreach($f in $files){ $p = Split-Path $f -Parent; while($p -and $p -ne ''){ $dirSet[($p -replace '\\','/')]=$true; $p = Split-Path $p -Parent } }
@@ -64,10 +64,6 @@ function Test-Cand([string]$cand, [string]$srcDir, [string]$label, [string]$line
   }
   $cands = @($c)
   if($srcDir){ $cands += "$srcDir/$c" }
-  if($c -match '^[0-9]{2}_'){ $cands += "agents/$c" }   # agents/ 角色目录内引用（BARE 拆出 NN_ 前缀）
-  if($srcDir -match '^agents(/|$)' -and $c -notmatch '/'){
-    $cands += "references/$c"; $cands += "templates/$c"; $cands += "memory-system/$c"; $cands += "modules/$c"
-  }
   foreach($t in $cands){
     if($null -eq $t){ continue }
     $t = $t.TrimEnd('/') -replace '//+','/'
@@ -78,6 +74,7 @@ function Test-Cand([string]$cand, [string]$srcDir, [string]$label, [string]$line
 Get-ChildItem -Recurse -File -LiteralPath $Root -Filter *.md | ForEach-Object {
   $rel = $_.FullName.Substring($Root.Length+1) -replace '\\','/'
   if($rel -like '.github/*'){ return }   # 方案/计划文档引用外部仓证据路径，不做死引用判定
+  if($rel -eq 'CHANGELOG.md'){ return }   # 更新日志引用项目侧文件名（记忆系统/正文等），非仓库资产引用
   $parts = $rel -split '/'
   $srcDir = if($parts.Count -gt 1){ ($parts[0..($parts.Count-2)] -join '/') } else { '' }
   $lines = [System.IO.File]::ReadAllLines($_.FullName, $enc)
@@ -109,12 +106,12 @@ if($StrictOrphan){
   # 旧版用「裸文件名是否出现在任意文档」判定，会被与项目侧产物同名的裸名（如 进度看板.md、
   # 创作状态追踪表.md）骗过而漏报——那类模板名字在仓库里到处都是，却可能无人真正引用。
   $orphans = @()
-  $docRoots = @('README.md','LICENSE','.gitignore','SKILL.md','system_prompt.md')
+  $docRoots = @('README.md','LICENSE','.gitignore','SKILL.md','system_prompt.md','CHANGELOG.md','THIRD-PARTY-LICENSES.txt')
   # 可解析资产清单（排除 .git）
   $allFiles = Get-ChildItem -Recurse -File -LiteralPath $Root | ForEach-Object { $_.FullName.Substring($Root.Length+1) -replace '\\','/' }
-  $assetSet = @{}; foreach($a in $allFiles){ if(($a -notlike '.git/*') -and ($a -notlike '.github/plans/*') -and ($a -notlike '.agents/*')){ $assetSet[$a] = $true } }   # ADR/计划为过程记录，不按 skill 资产判孤儿
+  $assetSet = @{}; foreach($a in $allFiles){ if(($a -notlike '.git/*') -and ($a -notlike '.github/plans/*')){ $assetSet[$a] = $true } }   # 计划文档为过程记录，不按 skill 资产判孤儿
   # 引用前缀目录白名单（与 skill 资产目录一致）
-  $strictDirs = @('modules','references','templates','memory-system','agents','scripts','templates/constraints','references/rulesets')
+  $strictDirs = @('modules','references','templates','memory-system','scripts','templates/constraints','references/rulesets')
   $strictDirsCn = @('模块','参考资源','模板','圣经','摘要','阶段','卷','约束')
   $strictPre = '(?:' + (($strictDirs + $strictDirsCn) -join '|') + ')'
   # 引用形态：<白名单目录>/<文件名>.md —— 要求 .md 前有 '/'，故「(模板：xxx.md)」这类裸名不计入
@@ -130,7 +127,7 @@ if($StrictOrphan){
   foreach($f in $files){
     if($docRoots -contains $f){ continue }
     if($f -like '.github/*'){ continue }        # 维护者工具，无需被 skill 内容引用
-    if($f -like '.agents/*'){ continue }        # ADR 为过程记录，不按资产判孤儿
+    if($f -like '.github/plans/*'){ continue }        # 计划文档为过程记录，不按资产判孤儿
     if(-not $refs.ContainsKey($f)){ $orphans += $f }
   }
   if($orphans.Count){
@@ -143,7 +140,7 @@ if($StrictOrphan){
   foreach($f in $files){
     if($f -match '^(README|LICENSE|\.gitignore)'){ continue }
     if($f -like '.github/*'){ continue }   # .github/ 为维护者工具/文档，无需被 skill 内容引用
-    if($f -like '.agents/*'){ continue }   # ADR 为过程记录，不按资产判孤儿（与 -StrictOrphan 分支同口径）
+    if($f -like '.github/plans/*'){ continue }   # 计划文档为过程记录，不按资产判孤儿（与 -StrictOrphan 分支同口径）
     $base = [System.IO.Path]::GetFileName($f); $fwd = $f -replace '\\','/'
     $hits = 0
     foreach($k in $allText.Keys){ if($k -ne $fwd -and ($allText[$k].Contains($base) -or $allText[$k].Contains($fwd))){ $hits++ } }

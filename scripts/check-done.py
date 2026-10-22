@@ -657,7 +657,7 @@ def main() -> int:
             print("修复：清空对应 .done 文件内容（保留文件名），或删除后重写")
         if state_on and str(STATE_MARK.get("name", "state")) in missing:
             print(
-                f"提示：缺 {str(STATE_MARK.get('name', 'state'))} → 须先跑 scripts/state_commit.py commit --chapter N"
+                f"提示：缺 {str(STATE_MARK.get('name', 'state'))} → 先 draft --chapter N 生成事务、填 delta，再 commit --chapter N --input <事务文件>"
                 "（派生一致性用 state_commit check 核验）"
             )
         if "zhuque" in missing:

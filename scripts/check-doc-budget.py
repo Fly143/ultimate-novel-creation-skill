@@ -24,7 +24,7 @@ from pathlib import Path
 
 BUDGET_PATH = Path(__file__).resolve().parent / "doc-budget.json"
 # 度量口径（与 ps1 逐字一致）：UTF-8 字节解码剥 BOM → 换行归一化为 \n → 移除空白集合
-WS_RE = re.compile(r"[ \t\n\f\v\u00a0\u2028\u2029\u3000]+")
+WS_RE = re.compile("[\t\n\x0b\x0c\r\x1c-\x1f \x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+")  # 全空白集（对齐 _WS_REF 与 ps1）：原窄集漏 CR / x1c-x1f / x85 / u2000-u200a 等
 _WS_REF = "\t\n\x0b\x0c\r\x1c\x1d\x1e\x1f \x85\xa0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000"
 _I64_MIN, _I64_MAX = -(2 ** 63), 2 ** 63 - 1
 

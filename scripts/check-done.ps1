@@ -560,7 +560,7 @@ if (($missing.Count -gt 0) -or ($nonempty.Count -gt 0)) {
         Write-Output '修复：清空对应 .done 文件内容（保留文件名），或删除后重写'
     }
     if ($stateOn -and ($missing -contains $stateMarkName)) {
-        Write-Output ('提示：缺 {0} → 须先跑 scripts/state_commit.py commit --chapter N（派生一致性用 state_commit check 核验）' -f $stateMarkName)
+        Write-Output ('提示：缺 {0} → 先 draft --chapter N 生成事务、填 delta，再 commit --chapter N --input <事务文件>（派生一致性用 state_commit check 核验）' -f $stateMarkName)
     }
     if ($missing -contains 'zhuque') {
         Write-Output '提示：缺 zhuque → 须补跑 03_26 4.1b–4.1e 人工证据包（见 modules/03_26_功能模块.md）'

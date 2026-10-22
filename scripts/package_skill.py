@@ -67,6 +67,7 @@ def main() -> int:
     ap.add_argument("--root", default=str(Path(__file__).resolve().parents[1]))
     ap.add_argument("--out", default="")
     ap.add_argument("--check", action="store_true")
+    ap.add_argument("--force", action="store_true", help="覆盖已存在的输出文件（默认拒绝，防手工补过的包被静默抹掉）")
     a = ap.parse_args()
     root = Path(a.root).expanduser().resolve()
 
@@ -94,6 +95,9 @@ def main() -> int:
     if a.check:
         return 0
     out = Path(a.out or (root / "dist" / "skill-package.zip")).expanduser().resolve()
+    if out.exists() and not a.force:
+        print(f"❌ 输出文件已存在：{out}（确认要覆盖请加 --force；默认不抹掉已有包）")
+        return 1
     out.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
         for rel in rels:

@@ -132,7 +132,7 @@ if ($schemaErrs.Count -gt 0) {
     exit 1
 }
 # 度量口径（与 py 逐字一致）：UTF-8 字节解码剥 BOM → 换行归一化为 \n → 移除空白集合
-$wsRe = [regex]'[ \t\n\f\v\u00a0\u2028\u2029\u3000]+'
+$wsRe = [regex]'[\t\n\x0b\x0c\r\x1c-\x1f \x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+'   # 全空白集（对齐 py WS_RE）
 $nlRe = [regex]"\r\n|\r"
 $errors = @()
 

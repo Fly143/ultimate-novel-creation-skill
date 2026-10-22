@@ -1,6 +1,6 @@
 # 机制移植计划（维护者专用）
 
-> 位置：`.github/plans/`　·　不进 skill 运行时　·　`audit.ps1` 对 `.github/*` 不做孤儿/引用检查
+> 位置：`.github/plans/`（**维护者过程记录，非运行时、不随发布包分发**；`package_skill` 白名单不含 `.github/`）　·　`audit.ps1` 对 `.github/*` 不做孤儿/引用检查
 
 本目录记录「从 GitHub 同类项目移植机制进本 skill」的完整方案。所有内容为**方案文本**，不含运行时依赖；实施时按各文件中的「落点」改动 skill 资产。
 

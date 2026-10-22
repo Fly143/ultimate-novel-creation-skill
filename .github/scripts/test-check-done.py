@@ -52,7 +52,9 @@ FLAG_MAP = {
 
 
 def find_powershell() -> str | None:
-    for name in ("pwsh", "powershell"):
+    # SUITE_PS 可强制引擎（CI 用它跑 Windows PowerShell 5.1 一条腿：默认挑 PATH 首位恒为 pwsh7）
+    forced = os.environ.get("SUITE_PS", "").strip()
+    for name in ([forced] if forced else []) + ["pwsh", "powershell"]:
         path = shutil.which(name)
         if path:
             return path

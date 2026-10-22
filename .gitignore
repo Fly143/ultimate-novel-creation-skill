@@ -1,5 +1,10 @@
 test-prompts.json
 审计报告*.md
-scripts/__pycache__/
-.github/scripts/__pycache__/
+__pycache__/
+*.pyc
 dist/
+*.zip
+.venv/
+.DS_Store
+Thumbs.db
+*.log

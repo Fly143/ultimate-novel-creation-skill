@@ -3,18 +3,38 @@ name: 完整性审计
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
+  workflow_dispatch:
+
+# 同一 ref 连续 push 只跑最新一次（原无 concurrency，两次 push 并行烧 runner）
+concurrency:
+  group: audit-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
   audit:
-    name: 引用/孤儿/版本/路径/写后顺序审计
+    name: 引用/孤儿/版本/路径/写后顺序审计 + 回归
     runs-on: windows-latest
+    timeout-minutes: 45
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
+
+      - name: tag 与 SKILL.md version 一致（仅 tag 触发）
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          # 原 CI 只比对 SKILL↔README 徽章，不比对 tag：tag 打错也全绿
+          $tag = "${{ github.ref_name }}" -replace '^v', ''
+          $m = Select-String -Path SKILL.md -Pattern '^version:\s*(.+)$' | Select-Object -First 1
+          if (-not $m) { Write-Error '❌ SKILL.md 缺 version 字段'; exit 1 }
+          $ver = $m.Matches[0].Groups[1].Value.Trim()
+          if ($tag -ne $ver) { Write-Error "❌ tag v$tag ≠ SKILL.md version $ver"; exit 1 }
+          Write-Host "✅ tag v$tag 与 SKILL.md version 一致"
 
       - name: 运行完整性审计
         shell: pwsh
@@ -26,12 +46,31 @@ jobs:
           pwsh .github/scripts/audit.ps1 -Root . -StrictOrphan -LintTerm -LintLineRef -LintBudget
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: check-done 回归测试（py + ps1 双入口）
+      - name: check-done 回归测试（pwsh 7）
         shell: pwsh
         env:
           PYTHONIOENCODING: utf-8
           PYTHONUTF8: "1"
         run: |
-          # 同一组 fixture 对 check-done.py 与 check-done.ps1 双跑；windows-latest 自带 powershell
-          python .github/scripts/test-check-done.py
+          python .github/scripts/test-check-done.py 2>&1 | Tee-Object -FilePath regression-pwsh7.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: check-done 回归测试（Windows PowerShell 5.1）
+        shell: pwsh
+        env:
+          PYTHONIOENCODING: utf-8
+          PYTHONUTF8: "1"
+          SUITE_PS: powershell
+        run: |
+          # runner 自带 powershell.exe(5.1)：BOM/GBK/ConvertTo-Json 差异最大的一支必须进 CI
+          # 套件默认挑 PATH 首位（runner 上恒为 pwsh7），SUITE_PS 强制走 5.1
+          python .github/scripts/test-check-done.py 2>&1 | Tee-Object -FilePath regression-ps51.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: 失败时上传日志
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: regression-logs
+          path: regression-*.log
+          if-no-files-found: ignore

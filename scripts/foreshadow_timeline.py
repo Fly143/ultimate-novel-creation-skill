@@ -236,7 +236,8 @@ def from_checklist(path: str) -> list[dict]:
             "paused" if "暂停" in st else "near" if "准备回收" in st else "open"
         items.append({"id": fid, "name": name, "planted": planted,
                       "planned": digits(g("plan")) or 0,
-                      "resolved": digits(g("first")) if status == "resolved" and False else 0,
+                      # 旧清单无回收章字段：resolved 恒 0（与 ps1 一致）；不要用 and False 表达，会被误读为 bug
+                      "resolved": 0,
                       "status": status})
     return items
 

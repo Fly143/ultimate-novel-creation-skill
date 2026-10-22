@@ -164,7 +164,11 @@ $readmeContent = [System.IO.File]::ReadAllText((Join-Path $Root 'README.md'), $e
 if($readmeContent -match 'version-([0-9]+\.[0-9]+\.[0-9]+)-blue'){ $readmeVer = $Matches[1] }
 if($skillVer -eq ''){ $errors += "版本号解析失败：SKILL.md 缺 version 字段" }
 elseif($readmeVer -ne '' -and $skillVer -ne $readmeVer){ $errors += "版本号不一致：SKILL.md=$skillVer vs README徽章=$readmeVer" }
-# README 未放版本徽章时不校验（README 允许精简，版本权威=SKILL.md）
+# README 未放版本徽章时不校验（README 允许精简，版本权威=SKILL.md）；有 .git 时回落到最近 tag
+if($skillVer -ne '' -and $readmeVer -eq '' -and (Test-Path -LiteralPath (Join-Path $Root '.git'))){
+  $tagVer = (& git -C $Root describe --tags --abbrev=0 2>$null) -replace '^v',''
+  if($tagVer -and ($tagVer -match '^[0-9]+\.[0-9]+\.[0-9]+$') -and $skillVer -ne $tagVer){ $errors += "版本号不一致：SKILL.md=$skillVer vs 最近 tag=v$tagVer" }
+}
 
 # ---------- ④ 残留英文路径 token（项目侧）----------
 

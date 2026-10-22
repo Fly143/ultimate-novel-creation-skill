@@ -3595,9 +3595,9 @@ def _run(results: list[bool]) -> int:
     def _ver_mut(r):
         _sk = r / "SKILL.md"
         _cur = re.search(r"version:\s*([\d.]+)", (ROOT / "SKILL.md").read_text(encoding="utf-8")).group(1)  # 动态取当前版本（升版后不脱靶）
-        _sk.write_text(_sk.read_text(encoding="utf-8").replace(f"version: {_cur}", "version: 9.9.9"), encoding="utf-8")
-    results.append(case("[三十一轮] audit 版本漂移变异（SKILL 9.9.9）→ rc1 点名版本", True,
-                        _audit_mut("ver", _ver_mut, "9.9.9")))
+        _sk.write_text(_sk.read_text(encoding="utf-8").replace(f"version: {_cur}", "version: 9.9"), encoding="utf-8")
+    results.append(case("[三十一轮] audit 版本号格式非法变异（SKILL 9.9）→ rc1 点名版本", True,
+                        _audit_mut("ver", _ver_mut, "版本号解析失败")))
 
 
     # === 三十二轮修复回归组（perl 降级路径空集/档位豁免/foreshadow 顶层数值/check-done 归因顺序） ===

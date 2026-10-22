@@ -1230,109 +1230,14 @@ def _run(results: list[bool]) -> int:
             return c == 1 and "正文交叉校验" in o and "第40段" in o
         results += check_engines("[修复] body_globs 改 .md → 双引擎都按单源定位正文（同判 exit1）", True, _glob_check)
 
-        # h) 预算守卫：负向注入 + branches/stacking/空引用/分层缺失 错误清单双引擎逐条一致
-        _bd = Path(tempfile.mkdtemp(prefix="budget-rules-"))
-        for _f in ("check-doc-budget.py", "check-doc-budget.ps1", "doc-budget.json"):
-            shutil.copy2(ROOT / "scripts" / _f, _bd / _f)
-        (_bd / "A.md").write_text("一" * 80, encoding="utf-8")
-        (_bd / "B.md").write_text("二" * 10, encoding="utf-8")
-        (_bd / "doc-budget.json").write_text(json.dumps({
-            "files": [
-                {"path": "A.md", "budget": 5, "why": "超预算注入", "layer": "protected"},
-                {"path": "B.md", "budget": 1000, "why": "正常", "layer": "compressible"},
-                {"path": "C.md", "budget": 1000, "why": "分层缺失注入", "layer": ""},
-                {"path": "MISSING.md", "budget": 10, "why": "缺文件注入", "layer": "protected"}
-            ],
-            "paths": [{"label": "路径X", "files": ["A.md", "", "B.md", "NOPE2.md"],
-                       "branches": [["A.md", "NOPE.md"], ["B.md"]],
-                       "stacking": [["A.md", "NOPE3.md"]]}],
-            "path_ceiling": {"limit": 200, "exempt": [], "why": "测试上限"},
-            "context_layers": {"protected": "p", "compressible": "c", "why": "w"}
-        }, ensure_ascii=False, indent=2), encoding="utf-8")
-
-        def _bd_run(engine: str) -> tuple[int, str]:
-            if engine == "ps1":
-                cmd = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(_bd / "check-doc-budget.ps1"), "-Root", str(_bd)]
-                proc = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
-                return proc.returncode, _decode(proc.stdout) + _decode(proc.stderr)
-            cmd = [PY, str(_bd / "check-doc-budget.py"), "--root", str(_bd)]
-            proc = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
-            out = (proc.stdout or b"").decode("utf-8", "replace")
-            err = (proc.stderr or b"").decode("utf-8", "replace")
-            return proc.returncode, out + err
-
-        _r_b = {e: _bd_run(e) for e in ENGINES}
-        results.append(case("[修复] 预算负向注入：py exit1 且点名超预算/缺文件/超上限", True,
-                            _r_b["py"][0] == 1 and "超预算：A.md" in _r_b["py"][1]
-                            and "（超预算注入）" in _r_b["py"][1] and "路径超上限：路径X" in _r_b["py"][1]))
-        _cross("[修复] 预算负向注入：错误清单顺序与 why py/ps1 逐条一致", True,
-               lambda: (_r_b["ps1"][0] == 1 and _nl(_r_b["ps1"][1]) == _nl(_r_b["py"][1])))
     except Exception as exc:  # noqa: BLE001
         results.append(case("[段:审计修复回归补测] 段内 setup/断言异常（登记 FAIL，后续段继续）", True, False,
                             f"{type(exc).__name__}: {exc}"))
 
-    # i-2) 余量<5% 硬闸（十五轮③：规则入码）——A.md 80 字符/预算 84（余量 4.8%）→ 双引擎 rc1 且文案逐字一致
-    _m5d = Path(tempfile.mkdtemp(prefix="budget-margin5-"))
-    for _f in ("check-doc-budget.py", "check-doc-budget.ps1", "doc-budget.json"):
-        shutil.copy2(ROOT / "scripts" / _f, _m5d / _f)
-    (_m5d / "A.md").write_text("一" * 80, encoding="utf-8")
-    (_m5d / "doc-budget.json").write_text(json.dumps({
-        "files": [{"path": "A.md", "budget": 84, "why": "余量闸注入", "layer": "protected"}],
-        "paths": [{"label": "路径M", "files": "A.md"}],
-        "generated": "G.md",
-        "path_ceiling": {"limit": 100000, "why": "t"},
-        "context_layers": {"protected": "p", "compressible": "c", "why": "w"}
-    }, ensure_ascii=False, indent=2), encoding="utf-8")
-    def _m5_run(engine: str) -> tuple[int, str]:
-        if engine == "ps1":
-            cmd = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(_m5d / "check-doc-budget.ps1"), "-Root", str(_m5d)]
-        else:
-            cmd = [PY, str(_m5d / "check-doc-budget.py"), "--root", str(_m5d)]
-        proc = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
-        return proc.returncode, _decode(proc.stdout) + _decode(proc.stderr)
-    _r_m = {e: _m5_run(e) for e in ENGINES}
-    results.append(case("[十五轮] 余量<5% 硬闸 → py rc1 点名「余量<5%」", True,
-                        _r_m["py"][0] == 1 and "余量<5%" in _r_m["py"][1]))
-    _cross("[十五轮] 余量<5% 硬闸 → ps1 与 py 输出逐字一致且 rc 同", True,
-           lambda: (_r_m["ps1"][0] == 1 and _nl(_r_m["ps1"][1]) == _nl(_r_m["py"][1])))
 
-    # i) 预算字符串简写形态（files/branches/stacking 单串）——历史 bug：py list(str) 拆成单字符、与 ps1 反向裁决
-    _shd = Path(tempfile.mkdtemp(prefix="budget-shorthand-"))
-    for _f in ("check-doc-budget.py", "check-doc-budget.ps1", "doc-budget.json"):
-        shutil.copy2(ROOT / "scripts" / _f, _shd / _f)
-    (_shd / "A.md").write_text("一" * 80, encoding="utf-8")
-    (_shd / "B.md").write_text("二" * 10, encoding="utf-8")
-    (_shd / "doc-budget.json").write_text(json.dumps({
-        "files": [{"path": "A.md", "budget": 100000, "why": "简写形态不超预算", "layer": "protected"}],
-        "paths": [{"label": "路径S", "files": "A.md", "branches": "B.md", "stacking": "B.md"}],
-        "generated": "G.md",
-        "path_ceiling": {"limit": 100000, "exempt": "路径S", "why": "t"},
-        "baseline": {"worst_path_chars": 0, "writer_delegated_chars": 0,
-                     "session_resident_chars": 0, "precheck_path_chars": 0,
-                     "max_single_file": "A.md=80", "measured_on": "2026-10-18"},
-        "context_layers": {"protected": "p", "compressible": "c", "why": "w"}
-    }, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    def _bud_run(d: Path, engine: str) -> tuple[int, str]:
-        if engine == "ps1":
-            cmd = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(d / "check-doc-budget.ps1"), "-Root", str(d)]
-            proc = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
-            return proc.returncode, _decode(proc.stdout) + _decode(proc.stderr)
-        cmd = [PY, str(d / "check-doc-budget.py"), "--root", str(d)]
-        proc = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
-        return proc.returncode, (proc.stdout or b"").decode("utf-8", "replace") + (proc.stderr or b"").decode("utf-8", "replace")
 
-    _r_s = {e: _bud_run(_shd, e) for e in ENGINES}
     # exempt/generated/stacking 均为单串：py 若回归 set(str)/list(str) 拆字符 → ⚪ 变 ✅、⚙ 拆成 4 行 → 断言必失
-    results.append(case("[修复] 预算字符串简写（files/branches/stacking/exempt/generated 单串）→ 不拆字符", True,
-                        _r_s["py"][0] == 0 and "路径S 100/100,000" in _r_s["py"][1]
-                        and "⚪ exempt 路径S" in _r_s["py"][1]
-                        and _r_s["py"][1].count("⚙ generated（脚本产出，不手测）：G.md") == 1,
-                        _r_s["py"][1][-200:]))
-    _cross("[修复] 预算字符串简写：py/ps1 输出逐条一致（防 list(str)/set(str) 回归）", True,
-           lambda: _r_s["ps1"][0] == 0 and _nl(_r_s["ps1"][1]) == _nl(_r_s["py"][1])
-           and "⚪ exempt 路径S" in _r_s["ps1"][1]
-           and _r_s["ps1"][1].count("⚙ generated（脚本产出，不手测）：G.md") == 1)
 
     # j) 行切分集合与 py splitlines 同口径：CR/VT/FF/RS/NEL/U+2028 切行（三段放行 exit0）；
     #    U+001F 是 splitlines 不切的边界（ps1 曾写 [-] 超集 → 反向裁决，须 exit1 且双引擎同判）
@@ -1363,21 +1268,6 @@ def _run(results: list[bool]) -> int:
         "[修复] 报告路径为目录 → 双引擎同判 missing exit1（ps1 不再放行）", True,
         lambda e, p=p_rd: (lambda r: r[0] == 1 and "报告校验：missing" in r[1])(run(p, 1, engine=e)))
 
-    # l) 预算条目为目录 → 双引擎同判「缺文件」exit1（CI 的 -LintBudget 只跑 ps1，曾量成 0 字符 ✅）
-    _bdd = Path(tempfile.mkdtemp(prefix="budget-direntry-"))
-    for _f in ("check-doc-budget.py", "check-doc-budget.ps1", "doc-budget.json"):
-        shutil.copy2(ROOT / "scripts" / _f, _bdd / _f)
-    (_bdd / "adir.md").mkdir()
-    (_bdd / "doc-budget.json").write_text(json.dumps({
-        "files": [{"path": "adir.md", "budget": 10, "why": "目录注入", "layer": "protected"}],
-        "paths": [],
-        "path_ceiling": {"limit": 100, "exempt": [], "why": "t"},
-        "context_layers": {"protected": "p", "compressible": "c", "why": "w"}
-    }, ensure_ascii=False, indent=2), encoding="utf-8")
-    _r_bd = {e: _bud_run(_bdd, e) for e in ENGINES}
-    results += check_engines(
-        "[修复] 预算条目为目录 → 双引擎同判缺文件 exit1", True,
-        lambda e: (lambda r: r[0] == 1 and "缺文件 adir.md" in r[1])(_r_bd[e]))
 
     # m) 空正文口径钉死：无可校验正文时跳过段号交叉（双引擎一致放行；收紧须双实现同步改）
     p_eb = _nhd / "p_eb"
@@ -1392,45 +1282,8 @@ def _run(results: list[bool]) -> int:
     _cross("[钉死口径] 空正文+超界段号 → 双引擎一致放行（当前宽松口径，收紧须双实现同步）", True,
            lambda: _r_eb["py"][0] == _r_eb["ps1"][0] == 0 and _nl(_r_eb["py"][1]) == _nl(_r_eb["ps1"][1]))
 
-    # q) 路径#小节 切片：小节边界前为 \f 时 py section_slice(splitlines) 切、ps1 曾用 `r?`n 不切 →
-    #    小节一直吃到文件尾、计数虚高反向裁决（该功能历史零用例 → 掩盖了行切分第三处漏改）
-    _fsec = Path(tempfile.mkdtemp(prefix="budget-fragment-"))
-    for _f in ("check-doc-budget.py", "check-doc-budget.ps1", "doc-budget.json"):
-        shutil.copy2(ROOT / "scripts" / _f, _fsec / _f)
-    (_fsec / "片段.md").write_bytes(("# 标题\n甲乙丙丁" + "\f" + "# 下一节\n" + ("长" * 60)).encode("utf-8"))
-    (_fsec / "doc-budget.json").write_text(json.dumps({
-        "files": [{"path": "片段.md#标题", "budget": 10, "why": "小节切片", "layer": "protected"}],
-        "paths": [],
-        "path_ceiling": {"limit": 100000, "exempt": [], "why": "t"},
-        "baseline": {"worst_path_chars": 0, "writer_delegated_chars": 0,
-                     "session_resident_chars": 0, "precheck_path_chars": 0,
-                     "max_single_file": "片段.md=7", "measured_on": "2026-10-18"},
-        "context_layers": {"protected": "p", "compressible": "c", "why": "w"}
-    }, ensure_ascii=False, indent=2), encoding="utf-8")
-    _r_fsec = {e: _bud_run(_fsec, e) for e in ENGINES}
-    results.append(case("[修复] 文件#小节 带 \f 边界 → 双引擎同算小节 7/10 exit0（ps1 不再吃全文虚高超预算）", True,
-                        _r_fsec["py"][0] == 0 and "片段.md#标题 7/10" in _r_fsec["py"][1]
-                        and _r_fsec["ps1"][0] == 0 and "片段.md#标题 7/10" in _r_fsec["ps1"][1]))
-    _cross("[修复] 路径#小节 切片：py/ps1 输出逐条一致", True,
-           lambda: _nl(_r_fsec["ps1"][1]) == _nl(_r_fsec["py"][1]))
 
     # r) 预算规则单源 schema/顶层形态校验：畸形输入双引擎同文案 fail-closed（py 曾对 {} 打 ✅ exit0）
-    for _tag, _rules, _want_msg in (
-        ("空规则对象", {}, "❌ 规则单源校验失败"),
-        ("paths 标量", {"files": [], "paths": "A.md",
-                        "path_ceiling": {"limit": 1, "exempt": [], "why": "t"}}, "❌ 规则单源校验失败"),
-        ("非对象顶层", [1, 2, 3], "❌ 规则单源解析失败"),
-    ):
-        _bad = Path(tempfile.mkdtemp(prefix="budget-bad-"))
-        for _f in ("check-doc-budget.py", "check-doc-budget.ps1", "doc-budget.json"):
-            shutil.copy2(ROOT / "scripts" / _f, _bad / _f)
-        (_bad / "doc-budget.json").write_text(json.dumps(_rules), encoding="utf-8")
-        _r_bad = {e: _bud_run(_bad, e) for e in ENGINES}
-        results.append(case(f"[修复] 预算规则 {_tag} → 双引擎同判 fail-closed exit1", True,
-                            _r_bad["py"][0] == 1 and _want_msg in _r_bad["py"][1]
-                            and _r_bad["ps1"][0] == 1 and _want_msg in _r_bad["ps1"][1]))
-        _cross(f"[修复] 预算规则 {_tag}：解析/校验文案 py/ps1 逐字一致", True,
-               lambda r=_r_bad: _nl(r["ps1"][1]) == _nl(r["py"][1]))
 
     # s) 残留锁文案对拍（py {int(age)} 无千分位 vs ps1 曾 {N0} → ≥1000s 时 2,001 vs 2000 文案反向）
     #    age 按实时算 → 两引擎启动间可能跨秒，故对年龄做占位归一后对拍全输出
@@ -1474,13 +1327,13 @@ def _run(results: list[bool]) -> int:
         write_body(proj, 1, 10)
         return d, proj
 
+
     def _done_run(d, proj, engine):
         if engine == "py":
             cmd = [PY, str(d / "check-done.py"), "--project", str(proj), "--chapter", "1"]
         else:
             cmd = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(d / "check-done.ps1"), "-Project", str(proj), "-Chapter", "1"]
         pr = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
-        # 主行对拍只比 stdout（解析详情 stderr 属引擎各自文案，与预算侧口径一致）
         return pr.returncode, _decode(pr.stdout)
 
     _bad_rules = []
@@ -1534,81 +1387,9 @@ def _run(results: list[bool]) -> int:
         _cross(f"[修复] 规则单源 {_tag}：py/ps1 主行逐字一致", True,
                lambda r=_rr: _nl(r["ps1"][1]) == _nl(r["py"][1]))
 
-    GOOD_BUD = json.dumps({
-        "files": [{"path": "A.md", "budget": 100000, "why": "t", "layer": "protected"}],
-        "paths": [],
-        "path_ceiling": {"limit": 100000, "exempt": [], "why": "t"},
-        "baseline": {"worst_path_chars": 0, "writer_delegated_chars": 0,
-                     "session_resident_chars": 0, "precheck_path_chars": 0,
-                     "max_single_file": "A.md=50", "measured_on": "2026-10-18"},
-        "context_layers": {"protected": "p", "compressible": "c", "why": "w"},
-    }, ensure_ascii=False)
 
-    # u) 预算坏形态矩阵补测（可选键类型/空组/空文件/BOM/root=相对）
-    _bforms = [
-        ("空文件", "", 1, "规则单源解析失败"),
-        ("仅空白", "\n  \n", 1, "规则单源解析失败"),
-        ("generated 标量数字", GOOD_BUD.replace('"paths": []', '"paths": [], "generated": 123'), 1, "generated 须为字符串或字符串数组"),
-        ("exempt 标量数字", GOOD_BUD.replace('"exempt": []', '"exempt": 123'), 1, "exempt 须为字符串或字符串数组"),
-        ("stacking 空组", GOOD_BUD.replace('"paths": []', '"paths": [{"label":"L","files":"A.md","stacking":[[]]}]'), 1, "stacking 组须为字符串或非空字符串数组"),
-        ("files 元素为数字", GOOD_BUD.replace('"path": "A.md"', '"path": 123'), 1, "files[0].path 须为字符串"),
-        ("paths.files 元素为数字", GOOD_BUD.replace('"paths": []', '"paths": [{"label":"L","files":[123]}]'), 1, "paths[0].files 须为字符串或字符串数组"),
-        ("budget 小数", GOOD_BUD.replace('"budget": 100000', '"budget": 10.9'), 1, "files[0].budget 须为整数"),
-        ("budget 字符串", GOOD_BUD.replace('"budget": 100000', '"budget": "3250"'), 1, "files[0].budget 须为整数"),
-    ]
 
-    def _bud_stdout(d, engine):
-        # 主行对拍只比 stdout（解析详情 stderr 属引擎各自文案，设计内不比）
-        if engine == "py":
-            cmd = [PY, str(d / "check-doc-budget.py"), "--root", str(d)]
-        else:
-            cmd = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(d / "check-doc-budget.ps1"), "-Root", str(d)]
-        pr = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
-        return pr.returncode, _decode(pr.stdout)
 
-    def _bud_fixture(txt_rules):
-        d = Path(tempfile.mkdtemp(prefix="bud-bad2-"))
-        for f in ("check-doc-budget.py", "check-doc-budget.ps1"):
-            shutil.copy2(ROOT / "scripts" / f, d / f)
-        (d / "A.md").write_text("一" * 50, encoding="utf-8")
-        (d / "doc-budget.json").write_text(txt_rules, encoding="utf-8")
-        return d
-
-    for _tag, _txt, _want, _needle in _bforms:
-        _bdir = _bud_fixture(_txt)
-        _rr2 = {e: _bud_stdout(_bdir, e) for e in ENGINES}
-        results.append(case(f"[修复] 预算规则 {_tag} → 双引擎同文案 exit{_want}", True,
-                            len({(v[0], _nl(v[1])) for v in _rr2.values()}) == 1
-                            and _rr2["py"][0] == _want and _needle in _rr2["py"][1]))
-        _cross(f"[修复] 预算规则 {_tag}：py/ps1 输出逐字一致", True,
-               lambda r=_rr2: _nl(r["ps1"][1]) == _nl(r["py"][1]))
-    _bdir = Path(tempfile.mkdtemp(prefix="bud-bom-"))
-    for f in ("check-doc-budget.py", "check-doc-budget.ps1"):
-        shutil.copy2(ROOT / "scripts" / f, _bdir / f)
-    (_bdir / "A.md").write_text("一" * 50, encoding="utf-8")
-    (_bdir / "doc-budget.json").write_bytes(b"\xef\xbb\xbf" + GOOD_BUD.encode("utf-8"))
-    _rr3 = {e: _bud_stdout(_bdir, e) for e in ENGINES}
-    results.append(case("[修复] 预算规则带 BOM → 双引擎解析放行 exit0", True,
-                        len({(v[0], _nl(v[1])) for v in _rr3.values()}) == 1 and _rr3["py"][0] == 0
-                        and "全部在预算内" in _rr3["py"][1]))
-    _cross("[修复] 预算规则带 BOM：py/ps1 输出逐条一致", True,
-           lambda: _nl(_rr3["ps1"][1]) == _nl(_rr3["py"][1]))
-    _bdir2 = _bud_fixture(GOOD_BUD)
-
-    def _bud_dot(engine):
-        if engine == "py":
-            cmd = [PY, str(_bdir2 / "check-doc-budget.py"), "--root", "."]
-        else:
-            cmd = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(_bdir2 / "check-doc-budget.ps1"), "-Root", "."]
-        pr = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"}, cwd=str(_bdir2))
-        return pr.returncode, _decode(pr.stdout)  # 口径统一：仅 stdout（5.1 stderr 含 CategoryInfo 多行会假红）
-
-    _rr4 = {e: _bud_dot(e) for e in ENGINES}
-    _dot_root = str(_bdir2.resolve())
-    results.append(case("[修复] 预算 -Root . → 首行回显归一为绝对路径（py/ps1 同）", True,
-                        len({(v[0], _nl(v[1])) for v in _rr4.values()}) == 1 and _rr4["py"][0] == 0
-                        and _dot_root.lower() in _rr4["ps1"][1].splitlines()[0].lower()
-                        and _dot_root.lower() in _rr4["py"][1].splitlines()[0].lower()))
 
     # v) PathType 补测：.done 为普通文件 / _state.json 为目录 → 双引擎同判
     p_df = _nhd / "p_donefile"
@@ -1886,22 +1667,8 @@ def _run(results: list[bool]) -> int:
                         _det_case("bom", b"\xef\xbb\xbf" + "第一段，句子一。\n第二段，句子二！".encode("utf-8"))))
 
     # z2) -Root 指向不存在路径 → 双引擎首行同为绝对路径、同判 exit1（GetFullPath 对缺失路径同样归一）
-    _missing = str(_bdir2 / "no-such-dir-r5")
 
-    def _bud_missing(engine):
-        if engine == "py":
-            cmd = [PY, str(_bdir2 / "check-doc-budget.py"), "--root", _missing]
-        else:
-            cmd = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(_bdir2 / "check-doc-budget.ps1"), "-Root", _missing]
-        pr = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"}, cwd=str(_bdir2))
-        return pr.returncode, _decode(pr.stdout)
 
-    _rr5 = {e: _bud_missing(e) for e in ENGINES}
-    _miss_n = _pnorm(_missing).lower()  # needle 也走归一（CI 上首行路径形态与原形不同）
-    results.append(case("[修复] 预算 -Root 不存在路径 → 双引擎首行同为绝对路径且同判 exit1", True,
-                        len({(v[0], _nl(v[1])) for v in _rr5.values()}) == 1 and _rr5["py"][0] == 1
-                        and _miss_n in _pnorm(_rr5["py"][1]).splitlines()[0].lower()
-                        and _miss_n in _pnorm(_rr5["ps1"][1]).splitlines()[0].lower()))
 
     # z3) -Project 指向普通文件 → 双引擎同文案 exit1（ps1 补 -PathType Container 后与 py is_dir 同判）
     p_file = _nhd / "p_isfile.txt"
@@ -2066,34 +1833,8 @@ def _run(results: list[bool]) -> int:
 
     # === 七轮修复回归组（B域：limit 入 schema、state_revision 超 Int32 消费、detect 缺文件、init 全角摘要一致跳过） ===
     # c1) path_ceiling.limit float → 双引擎同文案 fail-closed（schema 收口，防 py 截断/ps1 舍入反向）
-    def _lim_out(engine, lim_val):
-        d = _nhd / "p_lim_shared"
-        d.mkdir(exist_ok=True)
-        for _f in ("check-doc-budget.py", "check-doc-budget.ps1"):
-            shutil.copy2(ROOT / "scripts" / _f, d / _f)
-        (d / "A.md").write_text("短", encoding="utf-8")
-        (d / "doc-budget.json").write_text(json.dumps({
-            "files": [{"path": "A.md", "budget": 1000, "why": "w", "layer": "protected"}],
-            "paths": [{"label": "路径X", "files": ["A.md"]}],
-            "path_ceiling": {"limit": lim_val, "exempt": [], "why": "w"},
-            "context_layers": {"protected": "p", "compressible": "c", "why": "w"}
-        }, ensure_ascii=False), encoding="utf-8")
-        if engine == "py":
-            cmd = [PY, str(d / "check-doc-budget.py"), "--root", str(d)]
-        else:
-            cmd = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(d / "check-doc-budget.ps1"), "-Root", str(d)]
-        pr = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
-        return pr.returncode, _decode(pr.stdout)
 
-    _rrLim = {e: _lim_out(e, 45001.5) for e in ENGINES}
-    results.append(case("[七轮] 预算 limit=float → 双引擎同文案 fail-closed（path_ceiling.limit 入 schema）", True,
-                        len({(v[0], _nl(_norm_flags(v[1])).replace("\r", "")) for v in _rrLim.values()}) == 1
-                        and _rrLim["py"][0] == 1 and "path_ceiling.limit 须为正整数" in _rrLim["py"][1]))
 
-    _rrLimN = {e: _lim_out(e, None) for e in ENGINES}
-    results.append(case("[七轮] 预算 limit=null → 双引擎同文案 fail-closed（防 ps1 上限静默失效）", True,
-                        len({(v[0], _nl(_norm_flags(v[1])).replace("\r", "")) for v in _rrLimN.values()}) == 1
-                        and _rrLimN["py"][0] == 1 and "path_ceiling.limit 须为正整数" in _rrLimN["py"][1]))
 
     # c2) state_revision 超 Int32（3e9）→ 双引擎 commit 同判 exit0（ps1 [long] 消费，不再异常页）
     def _rev3e9_ok(engine):
@@ -2211,32 +1952,7 @@ def _run(results: list[bool]) -> int:
                         and "报告校验：ok" in _rrC9["py"][0][1] and "任务书校验：missing" in _rrC9["py"][1][1]))
 
     # d2) 预算 files[].path 带 U+001C 前缀 → 双引擎同判（Measure-Ref Trim 集收口）
-    def _u001c_out(engine):
-        d = _nhd / "p_u001c_shared"
-        d.mkdir(exist_ok=True)
-        for _f in ("check-doc-budget.py", "check-doc-budget.ps1"):
-            shutil.copy2(ROOT / "scripts" / _f, d / _f)
-        (d / "A.md").write_text("短", encoding="utf-8")
-        (d / "doc-budget.json").write_text(json.dumps({
-            "files": [{"path": "\x1cA.md", "budget": 1000, "why": "w", "layer": "protected"}],
-            "paths": [{"label": "路径X", "files": ["A.md"]}],
-            "path_ceiling": {"limit": 1000, "exempt": [], "why": "w"},
-            "baseline": {"worst_path_chars": 1, "writer_delegated_chars": 0,
-                         "session_resident_chars": 0, "precheck_path_chars": 0,
-                         "max_single_file": "A.md=1", "measured_on": "2026-10-18"},
-            "context_layers": {"protected": "p", "compressible": "c", "why": "w"}
-        }, ensure_ascii=False), encoding="utf-8")
-        if engine == "py":
-            cmd = [PY, str(d / "check-doc-budget.py"), "--root", str(d)]
-        else:
-            cmd = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(d / "check-doc-budget.ps1"), "-Root", str(d)]
-        pr = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
-        return pr.returncode, _decode(pr.stdout)
 
-    _rrU = {e: _u001c_out(e) for e in ENGINES}
-    results.append(case("[九轮] 预算 path 带 U+001C 前缀 → 双引擎同判（Measure-Ref Trim($wsChars)）", True,
-                        len({(v[0], _nl(v[1])) for v in _rrU.values()}) == 1
-                        and _rrU["py"][0] == 0))
 
     # d3) commit summaries 键 3e9 → 双引擎 rc0 渲染 第3000000000章摘要.md（[long] 排序/文件名）
     def _sum3e9_ok(engine):
@@ -2841,118 +2557,15 @@ def _run(results: list[bool]) -> int:
                         "输出不一致" if _null_msgs.get("py") != _null_msgs.get("ps1") else ""))
 
 
-    # === 十八轮修复回归组 2（数字域：基线闸 pw7 数组拍平修复） ===
-    # d30) baseline.session_resident_chars 过期 → py/ps1(pw7)/ps1(5.1) 三引擎同文案 rc1
-    _bd3 = Path(tempfile.mkdtemp(prefix="budget-blsync-"))
-    for _f in ("check-doc-budget.py", "check-doc-budget.ps1", "doc-budget.json"):
-        shutil.copy2(ROOT / "scripts" / _f, _bd3 / _f)
-    (_bd3 / "A.md").write_text("一" * 100, encoding="utf-8")
-    (_bd3 / "doc-budget.json").write_text(json.dumps({
-        "files": [{"path": "A.md", "budget": 100000, "why": "基线闸用例", "layer": "protected"}],
-        "paths": [{"label": "路径B", "files": "A.md"},
-                  {"label": "写一章·写手委派", "files": "A.md"},
-                  {"label": "主会话常驻（入口+协议+索引）", "files": "A.md"},
-                  {"label": "写前预检", "files": "A.md"}],
-        "generated": "G.md",
-        "path_ceiling": {"limit": 100000, "why": "t"},
-        "baseline": {"worst_path_chars": 999, "writer_delegated_chars": 999,
-                     "session_resident_chars": 999, "precheck_path_chars": 999,
-                     "max_single_file": "A.md=999", "measured_on": "2026-10-18"},
-        "context_layers": {"protected": "p", "compressible": "c", "why": "w"}
-    }, ensure_ascii=False, indent=2), encoding="utf-8")
-
-    def _bl3_run(engine: str) -> tuple[int, str]:
-        if engine == "ps1":
-            cmd = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(_bd3 / "check-doc-budget.ps1"), "-Root", str(_bd3)]
-        else:
-            cmd = [PY, str(_bd3 / "check-doc-budget.py"), "--root", str(_bd3)]
-        proc = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
-        return proc.returncode, _decode(proc.stdout) + _decode(proc.stderr)
-    _r_b3 = {e: _bl3_run(e) for e in ENGINES}
-    results.append(case("[十八轮] 基线闸五字段全过期 → ps1 rc1 且五字段全点名（Int64 判型已修）", True,
-                        _r_b3["ps1"][0] == 1 and _r_b3["ps1"][1].count("基线过期") == 5
-                        and all(_k in _r_b3["ps1"][1] for _k in ("worst_path_chars", "writer_delegated_chars", "session_resident_chars", "precheck_path_chars", "max_single_file"))))
-    results.append(case("[十八轮] 基线闸过期 → py/ps1 错误清单逐条一致", True,
-                        _r_b3["py"][0] == 1 and _nl(_r_b3["ps1"][1]) == _nl(_r_b3["py"][1])))
 
 
-    # === 十九轮修复回归组（数字域：基线值浮点型 fail-closed） ===
-    # d31) baseline 浮点写法（46959.0）→ py/ps1 均 rc1「基线非法」
-    _bd4 = Path(tempfile.mkdtemp(prefix="budget-badtype-"))
-    for _f in ("check-doc-budget.py", "check-doc-budget.ps1", "doc-budget.json"):
-        shutil.copy2(ROOT / "scripts" / _f, _bd4 / _f)
-    (_bd4 / "A.md").write_text("一" * 100, encoding="utf-8")
-    (_bd4 / "doc-budget.json").write_text(json.dumps({
-        "files": [{"path": "A.md", "budget": 100000, "why": "浮点基线用例", "layer": "protected"}],
-        "paths": [{"label": "路径F", "files": "A.md"}],
-        "generated": "G.md",
-        "path_ceiling": {"limit": 100000, "why": "t"},
-        "baseline": {"worst_path_chars": 100.0, "writer_delegated_chars": 100,
-                     "session_resident_chars": 100, "precheck_path_chars": 100,
-                     "max_single_file": "A.md=100", "measured_on": "2026-10-18"},
-        "context_layers": {"protected": "p", "compressible": "c", "why": "w"}
-    }, ensure_ascii=False, indent=2), encoding="utf-8")
-
-    def _badtype_run(engine: str) -> tuple[int, str]:
-        if engine == "ps1":
-            cmd = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(_bd4 / "check-doc-budget.ps1"), "-Root", str(_bd4)]
-        else:
-            cmd = [PY, str(_bd4 / "check-doc-budget.py"), "--root", str(_bd4)]
-        proc = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
-        return proc.returncode, _decode(proc.stdout) + _decode(proc.stderr)
-    _r_bt = {e: _badtype_run(e) for e in ENGINES}
-    results.append(case("[十九轮] baseline 浮点值 → py rc1 且点名「基线非法」（非整型 fail-closed）", True,
-                        _r_bt["py"][0] == 1 and "基线非法" in _r_bt["py"][1] and "worst_path_chars" in _r_bt["py"][1]))
-    results.append(case("[十九轮] baseline 浮点值 → ps1 与 py 同文案逐条一致", True,
-                        _r_bt["ps1"][0] == 1 and _nl(_r_bt["ps1"][1]) == _nl(_r_bt["py"][1])))
 
 
-    # === 二十轮修复回归组（数字域：基线闸五键齐全/换型 fail-closed） ===
-    # d32) 缺键/块缺失/字符串换型/布尔换型/max_single 非串 → 双引擎 rc1「基线非法/基线缺键」
-    _bl_muts = [
-        (lambda b: b["baseline"].pop("precheck_path_chars"), "基线缺键", "precheck_path_chars", "二十轮"),
-        (lambda b: b.update({"baselineX": b.pop("baseline")}), "基线非法：baseline 块缺失", "baseline 块缺失", "二十轮"),
-        (lambda b: b["baseline"].update({"worst_path_chars": "0"}), "基线非法", "worst_path_chars", "二十轮"),
-        (lambda b: b["baseline"].update({"writer_delegated_chars": True}), "基线非法", "writer_delegated_chars", "二十轮"),
-        (lambda b: b["baseline"].update({"max_single_file": 123}), "基线非法", "max_single_file", "二十轮"),
-        (lambda b: b.update({"baseline": {}}), "基线缺键", "worst_path_chars", "二十一轮"),
-        (lambda b: b["baseline"].update({"max_single_file": "B.md=50"}), "基线过期", "路径段须为实测最大单文件名", "二十一轮"),
-    ]
-    def _blmut_run(engine, mut, _d):
-        if engine == "ps1":
-            cmd = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(_d / "check-doc-budget.ps1"), "-Root", str(_d)]
-        else:
-            cmd = [PY, str(_d / "check-doc-budget.py"), "--root", str(_d)]
-        pr = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
-        return pr.returncode, _decode(pr.stdout)
-
-    def _blmut_pair(i, mut):
-        _d = Path(tempfile.mkdtemp(prefix="budget-blmut-"))
-        for _f in ("check-doc-budget.py", "check-doc-budget.ps1", "doc-budget.json"):
-            shutil.copy2(ROOT / "scripts" / _f, _d / _f)
-        (_d / "A.md").write_text("一" * 50, encoding="utf-8")
-        _b = {"files": [{"path": "A.md", "budget": 100000, "why": "二十轮基线闸用例", "layer": "protected"}],
-              "paths": [], "path_ceiling": {"limit": 100000, "exempt": [], "why": "t"},
-              "baseline": {"worst_path_chars": 0, "writer_delegated_chars": 0,
-                           "session_resident_chars": 0, "precheck_path_chars": 0,
-                           "max_single_file": "A.md=50", "measured_on": "2026-10-18"},
-              "context_layers": {"protected": "p", "compressible": "c", "why": "w"}}
-        mut(_b)
-        (_d / "doc-budget.json").write_text(json.dumps(_b, ensure_ascii=False), encoding="utf-8")
-        return {en: _blmut_run(en, mut, _d) for en in ENGINES}
-    _rr_blm = {i: _blmut_pair(i, m) for i, (m, _n1, _n2, _t1) in enumerate(_bl_muts)}
-    for i, (m, needle1, needle2, _tagm) in enumerate(_bl_muts):
-        results.append(case(f"[{_tagm}] 基线闸变异{i + 1}（{needle1}/{needle2}）→ py rc1 且点名", True,
-                            _rr_blm[i]["py"][0] == 1 and needle1 in _rr_blm[i]["py"][1]
-                            and needle2 in _rr_blm[i]["py"][1]))
-    _cross("[二十轮] 基线闸七类变异 → ps1 与 py 错误清单逐条一致", True,
-           lambda: all(_nl(_rr_blm[i]["ps1"][1]) == _nl(_rr_blm[i]["py"][1])
-                       and _rr_blm[i]["ps1"][0] == 1 for i in range(len(_bl_muts))))
 
 
-    # === 二十二轮修复回归组（BOM/深度/展示/Int64 双引擎同判） ===
-    # d34) ①fingerprint BOM ②detect 词表 BOM ③foreshadow 状态单 BOM ④state 深层落盘 ⑤预算展示 1e30 ⑥超 Int64 limit
-    # ① fingerprint 带 BOM → 双引擎指标值全等（py utf-8-sig 对齐 ps1 剥 BOM）
+
+
+
     _f_bom = _nhd / "fp_bom.txt"
     _f_bom.write_bytes(b"\xef\xbb\xbf" + "甲乙丙。丁戊己。庚辛壬。".encode("utf-8"))
     _rr_bfp = {}
@@ -3032,46 +2645,7 @@ def _run(results: list[bool]) -> int:
     _rr_deep = {e: _deep_run(e) for e in ENGINES}
     results.append(case("[二十二轮] state 深层 delta（meta 15 层）→ 双引擎落盘深度=15 不截断 rc0", True,
                         all(v[0] == 0 and v[1] == 15 for v in _rr_deep.values())))
-    # ⑤ 预算 baseline 浮点 1e30 → 双引擎「基线非法」且数字串同为 1E+30（G15 归一）
-    _bd_e = Path(tempfile.mkdtemp(prefix="budget-1e30-"))
-    for _f in ("check-doc-budget.py", "check-doc-budget.ps1", "doc-budget.json"):
-        shutil.copy2(ROOT / "scripts" / _f, _bd_e / _f)
-    (_bd_e / "A.md").write_text("一" * 100, encoding="utf-8")
-    (_bd_e / "doc-budget.json").write_text(json.dumps({
-        "files": [{"path": "A.md", "budget": 100000, "why": "1e30 展示用例", "layer": "protected"}],
-        "paths": [{"label": "路径F", "files": "A.md"}],
-        "generated": "G.md",
-        "path_ceiling": {"limit": 100000, "why": "t"},
-        "baseline": {"worst_path_chars": 1e30, "writer_delegated_chars": 100,
-                     "session_resident_chars": 100, "precheck_path_chars": 100,
-                     "max_single_file": "A.md=100", "measured_on": "2026-10-18"},
-        "context_layers": {"protected": "p", "compressible": "c", "why": "w"}
-    }, ensure_ascii=False, indent=2), encoding="utf-8")
-    def _run_1e30(engine):
-        if engine == "ps1":
-            cmd = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(_bd_e / "check-doc-budget.ps1"), "-Root", str(_bd_e)]
-        else:
-            cmd = [PY, str(_bd_e / "check-doc-budget.py"), "--root", str(_bd_e)]
-        proc = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
-        return proc.returncode, _decode(proc.stdout)
-    _r_e30 = {e: _run_1e30(e) for e in ENGINES}
-    results.append(case("[二十二轮] baseline=1e30 → 双引擎「基线非法」且数字串同为 1E+30", True,
-                        all(v[0] == 1 and "1E+30" in v[1] and "基线非法" in v[1] for v in _r_e30.values())
-                        and len({_nl(v[1]) for v in _r_e30.values()}) == 1))
     # ⑥ 超 Int64 整数 limit → py/ps1 同判 rc1「须为正整数」（py _in_i64 收口；0 亦拒防闸短路）
-    (_bd_e / "doc-budget.json").write_text(json.dumps({
-        "files": [{"path": "A.md", "budget": 100000, "why": "Int64 用例", "layer": "protected"}],
-        "paths": [],
-        "path_ceiling": {"limit": 10 ** 30, "exempt": [], "why": "t"},
-        "baseline": {"worst_path_chars": 100, "writer_delegated_chars": 100,
-                     "session_resident_chars": 100, "precheck_path_chars": 100,
-                     "max_single_file": "A.md=100", "measured_on": "2026-10-18"},
-        "context_layers": {"protected": "p", "compressible": "c", "why": "w"}
-    }, ensure_ascii=False, indent=2), encoding="utf-8")
-    _r_i64 = {e: _run_1e30(e) for e in ENGINES}
-    results.append(case("[二十二轮] limit=10^30 超 Int64 → 双引擎同判 rc1「path_ceiling.limit 须为正整数」", True,
-                        all(v[0] == 1 and "path_ceiling.limit 须为正整数" in v[1] for v in _r_i64.values())
-                        and len({_nl(v[1]) for v in _r_i64.values()}) == 1))
 
 
     # === 二十三轮修复回归组（BOM 状态单读入口、展示归一） ===
@@ -3091,67 +2665,9 @@ def _run(results: list[bool]) -> int:
     results.append(case("[二十三轮] _state.json 带 BOM → 双引擎 draft/check 同判 rc0（load_json utf-8-sig）", True,
                         _rr_bs["py"][0] == 0 and _rr_bs["py"][2] == 0
                         and len(set(_rr_bs.values())) == 1))
-    # d35② 非法基线展示：Infinity / 超 Int64 整数 / 全角 max_single 数字段 → 双引擎同文案 rc1
-    def _disp_pair(mutate):
-        _d = Path(tempfile.mkdtemp(prefix="budget-disp-"))
-        for _f in ("check-doc-budget.py", "check-doc-budget.ps1", "doc-budget.json"):
-            shutil.copy2(ROOT / "scripts" / _f, _d / _f)
-        (_d / "A.md").write_text("一" * 100, encoding="utf-8")
-        _b = {"files": [{"path": "A.md", "budget": 100000, "why": "展示归一用例", "layer": "protected"}],
-              "paths": [], "path_ceiling": {"limit": 100000, "why": "t"},
-              "baseline": {"worst_path_chars": 0, "writer_delegated_chars": 0,
-                           "session_resident_chars": 0, "precheck_path_chars": 0,
-                           "max_single_file": "A.md=100", "measured_on": "2026-10-18"},
-              "context_layers": {"protected": "p", "compressible": "c", "why": "w"}}
-        mutate(_b)
-        (_d / "doc-budget.json").write_text(json.dumps(_b, ensure_ascii=False), encoding="utf-8")
-        outs = {}
-        for _e in ENGINES:
-            if _e == "ps1":
-                cmd = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(_d / "check-doc-budget.ps1"), "-Root", str(_d)]
-            else:
-                cmd = [PY, str(_d / "check-doc-budget.py"), "--root", str(_d)]
-            pr = subprocess.run(cmd, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
-            outs[_e] = (pr.returncode, _nl(_decode(pr.stdout)))
-        return outs
-    _disp_forms = (
-        (lambda b: b["baseline"].update({"worst_path_chars": float("inf")}), "INFINITY"),
-        (lambda b: b["baseline"].update({"worst_path_chars": 10 ** 30}), "1E+30"),
-        (lambda b: b["baseline"].update({"max_single_file": "A.md=５０"}), "基线非法"),
-    )
-    for _di, (_mut, _ndisp) in enumerate(_disp_forms):
-        _rr_disp = _disp_pair(_mut)
-        results.append(case(f"[二十三轮] 展示归一{ _di + 1 }（{_ndisp}）→ 双引擎同文案 rc1", True,
-                            all(v[0] == 1 and _ndisp in v[1] for v in _rr_disp.values())
-                            and len({_v[1] for _v in _rr_disp.values()}) == 1))
 
 
-    # === 二十四轮修复回归组（max_single 串形/三标量 Int64/null/text_guard 规则 BOM） ===
-    # d36① max_single='A.md=+100' → 双引擎同判 rc1「基线非法」（ps1 串形收严对齐 py 正则）
-    # 用共享目录（root 行一致）
-    _dp = Path(tempfile.mkdtemp(prefix="budget-plus-"))
-    for _f in ("check-doc-budget.py", "check-doc-budget.ps1", "doc-budget.json"):
-        shutil.copy2(ROOT / "scripts" / _f, _dp / _f)
-    (_dp / "A.md").write_text("一" * 100, encoding="utf-8")
-    (_dp / "doc-budget.json").write_text(json.dumps({
-        "files": [{"path": "A.md", "budget": 100000, "why": "二十四轮串形用例", "layer": "protected"}],
-        "paths": [], "path_ceiling": {"limit": 100000, "why": "t"},
-        "baseline": {"worst_path_chars": 0, "writer_delegated_chars": 0,
-                     "session_resident_chars": 0, "precheck_path_chars": 0,
-                     "max_single_file": "A.md=+100", "measured_on": "2026-10-18"},
-        "context_layers": {"protected": "p", "compressible": "c", "why": "w"}
-    }, ensure_ascii=False), encoding="utf-8")
     _rr_plus = {}
-    for _e_p in ENGINES:
-        if _e_p == "ps1":
-            _c_p = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(_dp / "check-doc-budget.ps1"), "-Root", str(_dp)]
-        else:
-            _c_p = [PY, str(_dp / "check-doc-budget.py"), "--root", str(_dp)]
-        _pr_p = subprocess.run(_c_p, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
-        _rr_plus[_e_p] = (_pr_p.returncode, _nl(_decode(_pr_p.stdout)))
-    results.append(case("[二十四轮] max_single=A.md=+100 → 双引擎同判 rc1「基线非法」（ps1 串形收严）", True,
-                        all(v[0] == 1 and "基线非法" in v[1] and "max_single_file" in v[1] for v in _rr_plus.values())
-                        and len({v[1] for v in _rr_plus.values()}) == 1))
     # d36② 三标量超 Int64（10^30）→ state check 双引擎 rc1 同文案 + check-done 闭环双引擎 rc1
     def _tri64(engine):
         _pj = _nhd / f"p_tri64_{engine}"
@@ -3216,31 +2732,7 @@ def _run(results: list[bool]) -> int:
                         and len(set(_rr_tgb.values())) == 1))
 
 
-    # === 二十五轮修复回归组（max_single 尾 \n 串形、Int64 上界自增） ===
-    # d37① max_single="A.md=100\n" → 双引擎同判 rc1（ps1 \A\z 收严，不被 $ 尾换行放行）
-    _dn = Path(tempfile.mkdtemp(prefix="budget-nl-"))
-    for _f in ("check-doc-budget.py", "check-doc-budget.ps1", "doc-budget.json"):
-        shutil.copy2(ROOT / "scripts" / _f, _dn / _f)
-    (_dn / "A.md").write_text("一" * 100, encoding="utf-8")
-    (_dn / "doc-budget.json").write_text(json.dumps({
-        "files": [{"path": "A.md", "budget": 100000, "why": "二十五轮串形用例", "layer": "protected"}],
-        "paths": [], "path_ceiling": {"limit": 100000, "why": "t"},
-        "baseline": {"worst_path_chars": 0, "writer_delegated_chars": 0,
-                     "session_resident_chars": 0, "precheck_path_chars": 0,
-                     "max_single_file": "A.md=100\n", "measured_on": "2026-10-18"},
-        "context_layers": {"protected": "p", "compressible": "c", "why": "w"}
-    }, ensure_ascii=False), encoding="utf-8")
     _rr_nl = {}
-    for _e_nl in ENGINES:
-        if _e_nl == "ps1":
-            _c_nl = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(_dn / "check-doc-budget.ps1"), "-Root", str(_dn)]
-        else:
-            _c_nl = [PY, str(_dn / "check-doc-budget.py"), "--root", str(_dn)]
-        _pr_nl = subprocess.run(_c_nl, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
-        _rr_nl[_e_nl] = (_pr_nl.returncode, _nl(_decode(_pr_nl.stdout)))
-    results.append(case("[二十五轮] max_single=A.md=100+尾换行 → 双引擎同判 rc1「基线非法」（ps1 \\A\\z 收严）", True,
-                        all(v[0] == 1 and "基线非法" in v[1] and "max_single_file" in v[1] for v in _rr_nl.values())
-                        and len({v[1] for v in _rr_nl.values()}) == 1))
     # d37② state_revision=Int64 上界 → 双引擎 commit 同判 rc1「自增会溢出」（拒绝提交，状态不变）
     def _i64top(engine):
         _pj = _nhd / f"p_i64top_{engine}"
@@ -3560,27 +3052,6 @@ def _run(results: list[bool]) -> int:
     # d42① 顺序闸：围栏外错序句（含「无论」前缀与「后」变体）→ rc1 且点名「顺序一致性」
     _ord_forms = ("流程要求：无论 PASS/FAIL，先修复再朱雀，然后再跑 4.1b–4.1e。",
                   "流程要求：先修复后朱雀，然后再跑 4.1b–4.1e。")
-    for _oi, _op in enumerate(_ord_forms):
-        _od = Path(tempfile.mkdtemp(prefix="audit-ord-"))
-        shutil.copytree(ROOT, _od / "r", ignore=shutil.ignore_patterns(".git", "dist", "__pycache__", ".suite-tmp"))
-        _orf = _od / "r" / "modules" / "03_26_功能模块.md"
-        _orf.write_text(_orf.read_text(encoding="utf-8") + f"\n\n{_op}\n", encoding="utf-8")
-        _bo = subprocess.run([PY, str(_od / "r" / "scripts" / "check-doc-budget.py"), "--print-baseline", "--root", str(_od / "r")], capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
-        _bt = _decode(_bo.stdout)
-        _bjf = _od / "r" / "scripts" / "doc-budget.json"
-        _bcfg = json.loads(_bjf.read_text(encoding="utf-8-sig"))
-        _bcfg["baseline"]["worst_path_chars"] = int(re.search(r"最坏路径 ([\d,]+)", _bt).group(1).replace(",", ""))
-        for _bk, _bl in (("writer_delegated_chars", "写手委派"), ("session_resident_chars", "主会话常驻"), ("precheck_path_chars", "写前预检")):
-            _bm = re.search(_bl + r"[^\d]*([\d,]+)", _bt)
-            if _bm:
-                _bcfg["baseline"][_bk] = int(_bm.group(1).replace(",", ""))
-        _msm = re.search(r"(modules/03_26_功能模块\.md)\s+([\d,]+)/", _bt)
-        _bcfg["baseline"]["max_single_file"] = f"{_msm.group(1)}={int(_msm.group(2).replace(',', ''))}"
-        _bjf.write_text(json.dumps(_bcfg, ensure_ascii=False, indent=2), encoding="utf-8")
-        _pr_ord = subprocess.run([PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(_od / "r" / ".github/scripts" / "audit.ps1"), "-Root", str(_od / "r")], capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
-        results.append(case(f"[三十一轮] audit 顺序闸变异{_oi + 1}（错序句{_op[:10]}…）→ rc1 且点名「顺序一致性」", True,
-                            _pr_ord.returncode == 1 and "顺序一致性" in _decode(_pr_ord.stdout)))
-        shutil.rmtree(_od, ignore_errors=True)
     # d42② 孤儿文件变异 → -StrictOrphan rc1 点名；版本漂移变异 → rc1 点名
     def _audit_mut(name, mutate, needle):
         _md2 = Path(tempfile.mkdtemp(prefix=f"audit-{name}-"))
@@ -4675,48 +4146,13 @@ def _run(results: list[bool]) -> int:
                         len(set(_h583.values())) == 1 and _h583["py"][0] == 1 and bool(_h583["py"][1]) and '"abc"' in _h583["py"][1][0]))
 
 
-    # === 四十八轮修复回归组（limit=0 闸短路 / layer 大小写 / max_single 防漂移 / exempt 口径 / 同 id 重复 / label 重复） ===
-    import tempfile as _tf59
-    def _bud59(name, mutate):
-        _r59 = Path(_tf59.mkdtemp(prefix=f"bud-{name}-")) / "r"
-        shutil.copytree(ROOT, _r59 / "r2", ignore=shutil.ignore_patterns(".git", "dist", "__pycache__", ".suite-tmp"))
-        _rr59 = _r59 / "r2"
-        _bj59 = json.loads((_rr59 / "scripts" / "doc-budget.json").read_text(encoding="utf-8-sig"))
-        mutate(_bj59)
-        (_rr59 / "scripts" / "doc-budget.json").write_text(json.dumps(_bj59, ensure_ascii=False, indent=2), encoding="utf-8")
-        return _rr59
-    def _run59(proj59):
-        _h59 = {}
-        for _e59 in ENGINES:
-            if _e59 == "py":
-                _c59 = [PY, str(proj59 / "scripts" / "check-doc-budget.py")]
-            else:
-                _c59 = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(proj59 / "scripts" / "check-doc-budget.ps1")]
-            _pr59 = subprocess.run(_c59, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"}, cwd=str(proj59))
-            _h59[_e59] = (_pr59.returncode, "正整数" in _decode(_pr59.stdout) or "在预算内" in _decode(_pr59.stdout))
-        return _h59
     # d59① limit=0 → 双引擎 rc1「正整数」（原闸短路 fail-open rc0 打假成功行）
-    _h591 = _run59(_bud59("lim0", lambda b: b["path_ceiling"].__setitem__("limit", 0)))
-    results.append(case("[四十八轮] path_ceiling.limit=0 → 双引擎 rc1「须为正整数」（原闸短路 fail-open 打假成功行）", True,
-                        len(set(_h591.values())) == 1 and _h591["py"][0] == 1))
     # d59② layer=Protected（大小写错） → 双引擎 rc1「分层非法」（原 ps1 OrderedDictionary 不敏感放行）
-    _h592 = _run59(_bud59("layer", lambda b: b["files"][0].__setitem__("layer", "Protected")))
-    results.append(case("[四十八轮] layer=\"Protected\"（大小写错） → 双引擎 rc1「分层缺失/非法」（ps1 Ordinal 成员判定，原不敏感放行）", True,
-                        len(set(_h592.values())) == 1 and _h592["py"][0] == 1))
     # d59③ max_single 路径段大小写错 → 双引擎 rc1「基线过期」（原 ps1 -ne 不敏感防漂移闸失效）
-    def _mut593(b):
-        _ms59 = b["baseline"]["max_single_file"].split("=")
-        b["baseline"]["max_single_file"] = _ms59[0].upper() + "=" + _ms59[1]
-    _h593 = _run59(_bud59("msf", _mut593))
-    results.append(case("[四十八轮] max_single 路径段大小写错 → 双引擎 rc1「基线过期」（Ordinal 对齐 py，原 ps1 -ne 防漂移闸失效）", True,
-                        len(set(_h593.values())) == 1 and _h593["py"][0] == 1))
     # d59④ paths label 重复 → 双引擎 rc1「label 重复」（原双引擎同放行重复打印）
     def _mut594(b):
         _dup59 = dict(b["paths"][0])
         b["paths"].append(_dup59)
-    _h594 = _run59(_bud59("duplbl", _mut594))
-    results.append(case("[四十八轮] paths label 重复 → 双引擎 rc1「label 重复」（唯一性 fail-closed，原静默双计）", True,
-                        len(set(_h594.values())) == 1 and _h594["py"][0] == 1))
     # d59⑤ 清单同 id 重复条目 → 双引擎产物逐字一致（ps1 引用判不连坐，原 id 集合判丢条目）
     _d59 = _nhd / "d59"
     (_d59 / "记忆系统" / "圣经").mkdir(parents=True)

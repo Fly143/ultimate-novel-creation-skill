@@ -3934,6 +3934,21 @@ def _run(results: list[bool]) -> int:
                         len(set(_rr47o.values())) == 1 and bool(_ze47) and _ze47 == "第001章_中夜.txt"))
 
 
+    def _payload_consistent(out: str) -> bool:
+        """载荷行声明的文件数 == 随后列出的文件行数（不写死基数：白名单增减不再误红）"""
+        lines = out.splitlines()
+        for i, l in enumerate(lines):
+            m = re.search(r"载荷：(\d+) 个文件", l)
+            if m:
+                listed = 0
+                for x in lines[i + 1:]:
+                    if re.match(r"^\s+\d+\s+\S", x):
+                        listed += 1
+                    elif x.strip() == "":
+                        break
+                return int(m.group(1)) == listed
+        return False
+
     # === 三十七轮修复回归组（通配路径静默少算 / 文本守卫跨引擎互判） ===
     # d48① Root 含 []（合法目录名）→ package_skill 双引擎同载荷（-Path 通配会静默少算，rc0 假绿）
     _br48 = _nhd / "br[1]"
@@ -3953,7 +3968,7 @@ def _run(results: list[bool]) -> int:
         _pr48 = subprocess.run(_c48, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
         _pk48[_e48] = (_pr48.returncode, _nl(_decode(_pr48.stdout)).strip())
     results.append(case("[三十七轮] Root 含 []（合法目录名）→ package_skill 双引擎同载荷 rc0（-Path 通配不再静默少算）", True,
-                        len(set(_pk48.values())) == 1 and _pk48["py"][0] == 0 and "载荷：5 个文件" in _pk48["py"][1]))
+                        len(set(_pk48.values())) == 1 and _pk48["py"][0] == 0 and _payload_consistent(_pk48["py"][1]) and "modules/00_强制执行协议.md" in _pk48["py"][1]))
     # d48② text_guard digest 双引擎同文件（B/a 跨引擎互判手改）
     _tg48 = _nhd / "tg48"
     (_tg48 / "正文").mkdir(parents=True)
@@ -4146,9 +4161,9 @@ def _run(results: list[bool]) -> int:
             _c51c = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(ROOT / "scripts" / "package_skill.ps1"), "-Check", "-Root", str(_x51)]
         _pr51c = subprocess.run(_c51c, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
         _ol51c = _decode(_pr51c.stdout).splitlines()
-        _x51hit[_e51c] = tuple(l for l in _ol51c if "载荷" in l)[:1] + tuple(l for l in _ol51c if "__pycache__x.md" in l)[:1]
+        _x51hit[_e51c] = _nl(_decode(_pr51c.stdout)).strip()
     results.append(case("[四十轮] package_skill __pycache__x（子串段）不被误排 → 双引擎同载荷数（整段口径对齐 in p.parts）", True,
-                        len(set(_x51hit.values())) == 1 and len(_x51hit["py"]) == 2 and "4 个文件" in _x51hit["py"][0]))
+                        len(set(_x51hit.values())) == 1 and _payload_consistent(_x51hit["py"]) and "modules/__pycache__x.md" in _x51hit["py"]))
     # d51④ last_committed_chapter=\"3.7\" → 双引擎同「当前章」（原 py 0 / ps1 3 分叉）
     _v51 = _nhd / "v51"
     (_v51 / "正文").mkdir(parents=True)
@@ -4275,9 +4290,9 @@ def _run(results: list[bool]) -> int:
         else:
             _c52y = [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(ROOT / "scripts" / "package_skill.ps1"), "-Check", "-Root", str(_y52)]
         _pr52y = subprocess.run(_c52y, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
-        _y52hit[_e52y] = tuple(l for l in _decode(_pr52y.stdout).splitlines() if "载荷" in l)[:1]
+        _y52hit[_e52y] = _nl(_decode(_pr52y.stdout)).strip()
     results.append(case("[四十一轮] package_skill .PYC 大写 → 双引擎同载荷（lower 收口，原 py 大小写敏感分叉）", True,
-                        len(set(_y52hit.values())) == 1 and _y52hit["py"] and "4 个文件" in _y52hit["py"][0]))
+                        len(set(_y52hit.values())) == 1 and bool(_y52hit["py"]) and _payload_consistent(_y52hit["py"]) and "x.PYC" not in _y52hit["py"]))
     # d52⑧ 正文文件名 Unicode 数字 → 双引擎同「当前章」（原 py 认 ١٢、ps1 拒）
     _w52 = _nhd / "w52"
     (_w52 / "正文").mkdir(parents=True)

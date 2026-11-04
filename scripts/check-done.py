@@ -154,10 +154,11 @@ REQUIRE_STRONG: bool = False
 CLAIM_PARA_RE: re.Pattern[str] | None = None
 STATE_MARK: dict = {}
 BODY_GLOBS: list[str] = []
+PHASE_COMPRESS: dict = {}
 
 
 def _init_rules() -> None:
-    global RULES, BASE_MARKS, EVIDENCE_RULES, SECTION_TITLE, MIN_HITS, REQUIRE_STRONG, CLAIM_PARA_RE, STATE_MARK, BODY_GLOBS, TASK_SHEET, TASK_DIRS, TASK_SUFFIX, TASK_SECTIONS, TASK_ITEM_MARK
+    global RULES, BASE_MARKS, EVIDENCE_RULES, SECTION_TITLE, MIN_HITS, REQUIRE_STRONG, CLAIM_PARA_RE, STATE_MARK, BODY_GLOBS, PHASE_COMPRESS, TASK_SHEET, TASK_DIRS, TASK_SUFFIX, TASK_SECTIONS, TASK_ITEM_MARK
     RULES = load_rules()
     BASE_MARKS = list(RULES["base_marks"])
     EVIDENCE_RULES = [(r["name"], r["pattern"], bool(r["strong"])) for r in RULES["evidence_rules"]]
@@ -167,6 +168,7 @@ def _init_rules() -> None:
     CLAIM_PARA_RE = re.compile(RULES["claim_para_pattern"])
     STATE_MARK = RULES.get("state_mark", {})
     BODY_GLOBS = list(RULES["body_globs"])
+    PHASE_COMPRESS = RULES.get("phase_compress", {})
     TASK_SHEET = RULES["task_sheet"]
     TASK_DIRS = list(TASK_SHEET["dirs"])
     TASK_SUFFIX = TASK_SHEET["suffix"]
@@ -412,6 +414,29 @@ def check_report(
         if body_errs:
             return "body-mismatch", body_errs, report_warns
     return "ok", [], report_warns
+
+
+def check_phase_compress(project: Path, chapter: int) -> list[str]:
+    """阶段压缩门禁：10倍数章须存在对应阶段压缩文件。返回错误消息列表。"""
+    if not PHASE_COMPRESS.get("enabled", False):
+        return []
+    phase_len = int(PHASE_COMPRESS.get("phase_length", 10))
+    if phase_len <= 0 or chapter % phase_len != 0:
+        return []
+    n = chapter // phase_len
+    start = (n - 1) * phase_len + 1
+    end = n * phase_len
+    phase_dir = project / PHASE_COMPRESS.get("phase_dir", "记忆系统/阶段")
+    name = PHASE_COMPRESS.get(
+        "phase_name_template", "阶段{n}_第{start}-{end}章.md"
+    ).format(n=n, start=start, end=end)
+    phase_path = phase_dir / name
+    if not phase_path.is_file():
+        return [
+            f"阶段压缩校验：第{chapter}章为{phase_len}倍数章，缺阶段压缩文件 {phase_path}"
+            f"（03_18 工作流D：每{phase_len}章自动触发阶段压缩）"
+        ]
+    return []
 
 
 def check_task_sheet(
@@ -690,6 +715,14 @@ def main() -> int:
         print()
         print("❌ 状态单校验未通过：")
         for m in state_errs:
+            print(f"  {m}")
+        return 1
+
+    phase_errs = check_phase_compress(project, chapter)
+    if phase_errs:
+        print()
+        print("❌ 阶段压缩校验未通过：")
+        for m in phase_errs:
             print(f"  {m}")
         return 1
 

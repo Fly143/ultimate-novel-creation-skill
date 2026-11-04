@@ -227,6 +227,16 @@ if ($stateOn) { $required += $stateMarkName }
 $taskSheetSuffix = [string]$rules.task_sheet.suffix
 $taskSections = @($rules.task_sheet.required_sections | ForEach-Object { [string]$_ })
 $taskItemMark = [string]$rules.task_sheet.required_item_mark
+$phaseEnabled = $false
+$phaseLen = [long]10
+$phaseDirRel = '记忆系统/阶段'
+$phaseNameTpl = '阶段{n}_第{start}-{end}章.md'
+if ($rules.phase_compress) {
+    if ($null -ne $rules.phase_compress.enabled) { $phaseEnabled = [bool]$rules.phase_compress.enabled }
+    if ($null -ne $rules.phase_compress.phase_length) { $phaseLen = [long]$rules.phase_compress.phase_length }
+    if ($rules.phase_compress.phase_dir) { $phaseDirRel = [string]$rules.phase_compress.phase_dir }
+    if ($rules.phase_compress.phase_name_template) { $phaseNameTpl = [string]$rules.phase_compress.phase_name_template }
+}
 
 function Get-ChapterCandidates {
     param([string]$Nnn, [long]$Ch, [string]$Suffix)
@@ -341,6 +351,25 @@ function Find-BodyFile {
         if ($matches.Count -gt 0) { return [string]$matches[0] }
     }
     return $null
+}
+
+function Test-PhaseCompress {
+    param([string]$ProjectRoot, [long]$Ch)
+    # 阶段压缩门禁：10倍数章须存在对应阶段压缩文件（与 py check_phase_compress 同文案同口径）
+    if (-not $phaseEnabled) { return @() }
+    if ($phaseLen -le 0) { return @() }
+    if (($Ch % $phaseLen) -ne 0) { return @() }
+    $n = [long][Math]::Floor($Ch / $phaseLen)
+    $start = (($n - 1) * $phaseLen) + 1
+    $end = $n * $phaseLen
+    # 目录/文件名直拼（避免 Substring 前缀反推在 CI 路径形态下碎）
+    $phaseDir = Join-Path $ProjectRoot ($phaseDirRel -replace '/', [string][char]92)
+    $phaseName = $phaseNameTpl.Replace('{n}', [string]$n).Replace('{start}', [string]$start).Replace('{end}', [string]$end)
+    $phasePath = Join-Path $phaseDir $phaseName
+    if (-not (Test-Path -LiteralPath $phasePath -PathType Leaf)) {
+        return @(('阶段压缩校验：第{0}章为{1}倍数章，缺阶段压缩文件 {2}（03_18 工作流D：每{1}章自动触发阶段压缩）' -f $Ch, $phaseLen, $phasePath))
+    }
+    return @()
 }
 
 function Test-TaskSheet {
@@ -596,6 +625,14 @@ if ($stateErrs.Count -gt 0) {
     Write-Output ''
     Write-Output '❌ 状态单校验未通过：'
     $stateErrs | ForEach-Object { Write-Output ('  ' + $_) }
+    exit 1
+}
+
+$phaseErrs = @(Test-PhaseCompress -ProjectRoot $ProjectPath -Ch $Chapter)
+if ($phaseErrs.Count -gt 0) {
+    Write-Output ''
+    Write-Output '❌ 阶段压缩校验未通过：'
+    $phaseErrs | ForEach-Object { Write-Output ('  ' + $_) }
     exit 1
 }
 

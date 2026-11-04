@@ -94,5 +94,13 @@
     "auto_when_state_file": true,
     "state_file": "记忆系统/_state.json",
     "require_last_committed": true
+  },
+  "phase_compress": {
+    "_comment": "阶段压缩门禁（P0-4）：10倍数章须存在对应阶段压缩文件 记忆系统/阶段/阶段N_第X-Y章.md",
+    "enabled": true,
+    "trigger_chapters": "10倍数",
+    "phase_dir": "记忆系统/阶段",
+    "phase_name_template": "阶段{n}_第{start}-{end}章.md",
+    "phase_length": 10
   }
 }

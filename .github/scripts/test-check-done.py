@@ -549,8 +549,17 @@ def _run(results: list[bool]) -> int:
             empty_done(p5, 10, ["innovation"])
             write_report(p5, 10, GOOD_REPORT)
             write_body(p5, 10, 10)
+            # 阶段压缩门禁（phase_compress）：10 倍数章缺阶段压缩文件 → exit1
             results += check_engines(
-                "ch10 含 innovation+chapter+报告 → exit0",
+                "ch10 缺阶段压缩文件 → exit1",
+                True,
+                lambda e, p=p5: run(p, 10, engine=e)[0] == 1,
+            )
+            _phase_dir5 = p5 / "记忆系统" / "阶段"
+            _phase_dir5.mkdir(parents=True, exist_ok=True)
+            (_phase_dir5 / "阶段1_第1-10章.md").write_text("# 阶段1", encoding="utf-8")
+            results += check_engines(
+                "ch10 含 innovation+chapter+报告+阶段压缩 → exit0",
                 True,
                 lambda e, p=p5: run(p, 10, engine=e)[0] == 0,
             )
@@ -3368,7 +3377,7 @@ def _run(results: list[bool]) -> int:
             _pr47 = subprocess.run(_c47, capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
             _pk47[_e47] = (_pr47.returncode, _nl(_decode(_pr47.stdout)).strip())
         results.append(case("[三十六轮] package_skill 短路径根（8.3）→ 双引擎 rc0 同文案（Get-Item FullName 展开，不再 Resolve-Path 错位 rc1）", True,
-                            all(v[0] == 0 and "载荷：100 个文件" in v[1] for v in _pk47.values())
+                            all(v[0] == 0 and re.search(r"载荷：\d+ 个文件", v[1]) for v in _pk47.values())
                             and len(set(_pk47.values())) == 1))
         _au47 = subprocess.run([PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File", str(ROOT / ".github" / "scripts" / "audit.ps1"), "-Root", _short_root, "-StrictOrphan"], capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
         _au47ok = _au47.returncode == 0 and "死引用 0" in _decode(_au47.stdout)

@@ -1,0 +1,12 @@
+# 换行符统一为 LF（git 官方推荐；优先级高于 core.autocrlf 配置）
+* text=auto eol=lf
+
+# 二进制文件不转换
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.zip binary
+*.7z binary
+*.pdf binary

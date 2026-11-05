@@ -233,6 +233,10 @@ def empty_done(
         (done / f"第{nnn}章_{m}.done").write_bytes(b"")
     if with_chapter:
         (done / f"第{nnn}章_chapter.done").write_bytes(b"")
+    # file_gates archive：每章必有的有内容文件，属"最小配置"（缺它 exit1 的专项用例需显式删除后再测）
+    _rep = project / "报告"
+    _rep.mkdir(parents=True, exist_ok=True)
+    (_rep / f"第{nnn}章_章节档案.md").write_text("# 档案\n元数据+参数链条", encoding="utf-8")
 
 
 def write_report(project: Path, chapter: int, body: str, pad: bool = True) -> None:
@@ -558,10 +562,37 @@ def _run(results: list[bool]) -> int:
             _phase_dir5 = p5 / "记忆系统" / "阶段"
             _phase_dir5.mkdir(parents=True, exist_ok=True)
             (_phase_dir5 / "阶段1_第1-10章.md").write_text("# 阶段1", encoding="utf-8")
+            # 文件门禁（file_gates）：ch10 触发 archive（每章）+ param_compress（每10章）+ innovation_report（每10章）
             results += check_engines(
-                "ch10 含 innovation+chapter+报告+阶段压缩 → exit0",
+                "ch10 缺 file_gates 文件（archive/param/innovation报告）→ exit1",
+                True,
+                lambda e, p=p5: run(p, 10, engine=e)[0] == 1,
+            )
+            (p5 / "报告").mkdir(parents=True, exist_ok=True)
+            (p5 / "报告" / "第010章_章节档案.md").write_text("# 档案\n元数据+参数链条", encoding="utf-8")
+            (_phase_dir5 / "阶段1_参数.md").write_text("# 参数", encoding="utf-8")
+            (p5 / "报告" / "创新深度检查报告.md").write_text("# 创新", encoding="utf-8")
+            results += check_engines(
+                "ch10 含 innovation+chapter+报告+阶段压缩+file_gates → exit0",
                 True,
                 lambda e, p=p5: run(p, 10, engine=e)[0] == 0,
+            )
+            # archive 门禁：每章触发 —— 显式删除档案后 ch9（非10倍数章，只触发 archive）→ exit1
+            p5b = tmp_path / "p5b"
+            empty_done(p5b, 9, BASE)
+            write_report(p5b, 9, GOOD_REPORT)
+            write_body(p5b, 9, 10)
+            (p5b / "报告" / "第009章_章节档案.md").unlink()  # empty_done 已建档案，删掉测缺失
+            results += check_engines(
+                "ch9 缺章节档案（archive每章门禁）→ exit1",
+                True,
+                lambda e, p=p5b: run(p, 9, engine=e)[0] == 1,
+            )
+            (p5b / "报告" / "第009章_章节档案.md").write_text("# 档案", encoding="utf-8")
+            results += check_engines(
+                "ch9 含章节档案 → exit0",
+                True,
+                lambda e, p=p5b: run(p, 9, engine=e)[0] == 0,
             )
 
             p6 = tmp_path / "p6"
@@ -3396,6 +3427,7 @@ def _run(results: list[bool]) -> int:
     (_p47o / "正文" / "第001章_爱意.txt").write_text("爱意段落。\n", encoding="utf-8")
     (_p47o / "正文" / "第001章_中夜.txt").write_text("中夜段落。\n", encoding="utf-8")
     (_p47o / "报告" / "第001章_全量审核报告.md").write_text(GOOD_REPORT, encoding="utf-8")
+    (_p47o / "报告" / "第001章_章节档案.md").write_text("# 档案", encoding="utf-8")  # file_gates archive：本用例测 find_body 排序，补最小档案避免门禁干扰
     for _mk47o in json.loads((ROOT / "scripts" / "check-done-rules.json").read_text(encoding="utf-8-sig"))["base_marks"]:
         (_p47o / ".done" / f"第001章_{_mk47o}.done").write_bytes(b"")
     (_p47o / ".done" / "第001章_chapter.done").write_bytes(b"")

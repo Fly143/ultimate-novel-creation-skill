@@ -155,10 +155,11 @@ CLAIM_PARA_RE: re.Pattern[str] | None = None
 STATE_MARK: dict = {}
 BODY_GLOBS: list[str] = []
 PHASE_COMPRESS: dict = {}
+FILE_GATES: list[dict] = []
 
 
 def _init_rules() -> None:
-    global RULES, BASE_MARKS, EVIDENCE_RULES, SECTION_TITLE, MIN_HITS, REQUIRE_STRONG, CLAIM_PARA_RE, STATE_MARK, BODY_GLOBS, PHASE_COMPRESS, TASK_SHEET, TASK_DIRS, TASK_SUFFIX, TASK_SECTIONS, TASK_ITEM_MARK
+    global RULES, BASE_MARKS, EVIDENCE_RULES, SECTION_TITLE, MIN_HITS, REQUIRE_STRONG, CLAIM_PARA_RE, STATE_MARK, BODY_GLOBS, PHASE_COMPRESS, FILE_GATES, TASK_SHEET, TASK_DIRS, TASK_SUFFIX, TASK_SECTIONS, TASK_ITEM_MARK
     RULES = load_rules()
     BASE_MARKS = list(RULES["base_marks"])
     EVIDENCE_RULES = [(r["name"], r["pattern"], bool(r["strong"])) for r in RULES["evidence_rules"]]
@@ -169,6 +170,8 @@ def _init_rules() -> None:
     STATE_MARK = RULES.get("state_mark", {})
     BODY_GLOBS = list(RULES["body_globs"])
     PHASE_COMPRESS = RULES.get("phase_compress", {})
+    _fg = RULES.get("file_gates", {})
+    FILE_GATES = list(_fg.get("gates", [])) if isinstance(_fg, dict) else []
     TASK_SHEET = RULES["task_sheet"]
     TASK_DIRS = list(TASK_SHEET["dirs"])
     TASK_SUFFIX = TASK_SHEET["suffix"]
@@ -437,6 +440,64 @@ def check_phase_compress(project: Path, chapter: int) -> list[str]:
             f"（03_18 工作流D：每{phase_len}章自动触发阶段压缩）"
         ]
     return []
+
+
+def check_file_gates(project: Path, chapter: int) -> list[str]:
+    """通用文件门禁（P0-P3）：按频率检查项目文件存在性/非空。返回错误消息列表。"""
+    errs: list[str] = []
+    if not FILE_GATES:
+        return errs
+    nnn = f"{chapter:03d}"
+    for gate in FILE_GATES:
+        if not isinstance(gate, dict):
+            continue
+        if not gate.get("enabled", True):
+            continue
+        try:
+            every = int(gate.get("every_n", 1))
+        except (TypeError, ValueError):
+            continue
+        if every <= 0 or chapter % every != 0:
+            continue
+        tpl = str(gate.get("path_template", ""))
+        if not tpl:
+            continue
+        period = chapter // every
+        start = (period - 1) * every + 1
+        end = period * every
+        # 双候选：{nnn} 同时尝试零填充与不填充（与 _candidate_names 同口径，兼容 pad=False 项目）
+        if "{nnn}" in tpl:
+            cands = [
+                tpl.format(nnn=nnn, ch=chapter, n=period, start=start, end=end),
+                tpl.format(nnn=str(chapter), ch=chapter, n=period, start=start, end=end),
+            ]
+        else:
+            try:
+                cands = [tpl.format(nnn=nnn, ch=chapter, n=period, start=start, end=end)]
+            except (KeyError, IndexError, ValueError) as exc:
+                errs.append(f"文件门禁 {gate.get('name', '?')}：path_template 变量错误（{exc}）→ {tpl}")
+                continue
+        cands = list(dict.fromkeys(cands))  # 去重（chapter≥100 时两候选相同）
+        try:
+            paths = [project / c for c in cands]
+        except (KeyError, IndexError, ValueError) as exc:
+            errs.append(f"文件门禁 {gate.get('name', '?')}：path_template 变量错误（{exc}）→ {tpl}")
+            continue
+        name = str(gate.get("name", tpl))
+        desc = str(gate.get("desc", ""))
+        found_path = next((p for p in paths if p.is_file()), None)
+        if found_path is None:
+            errs.append(
+                f"文件门禁 {name}：第{chapter}章（每{every}章触发）缺文件 {paths[0]}"
+                + (f"（{desc}）" if desc else "")
+            )
+        elif gate.get("require_nonempty", False):
+            try:
+                if found_path.stat().st_size == 0:
+                    errs.append(f"文件门禁 {name}：文件为空 {found_path}" + (f"（{desc}）" if desc else ""))
+            except OSError as exc:
+                errs.append(f"文件门禁 {name}：无法读取 {found_path}：{exc}")
+    return errs
 
 
 def check_task_sheet(
@@ -723,6 +784,14 @@ def main() -> int:
         print()
         print("❌ 阶段压缩校验未通过：")
         for m in phase_errs:
+            print(f"  {m}")
+        return 1
+
+    file_gate_errs = check_file_gates(project, chapter)
+    if file_gate_errs:
+        print()
+        print("❌ 文件门禁未通过（file_gates）：")
+        for m in file_gate_errs:
             print(f"  {m}")
         return 1
 

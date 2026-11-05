@@ -237,6 +237,20 @@ if ($rules.phase_compress) {
     if ($rules.phase_compress.phase_dir) { $phaseDirRel = [string]$rules.phase_compress.phase_dir }
     if ($rules.phase_compress.phase_name_template) { $phaseNameTpl = [string]$rules.phase_compress.phase_name_template }
 }
+$fileGates = @()
+if ($rules.file_gates -and $rules.file_gates.gates) {
+    foreach ($g in $rules.file_gates.gates) {
+        if ($null -eq $g -or $g -isnot [pscustomobject]) { continue }
+        $fileGates += @{
+            Name = [string]$g.name
+            Desc = [string]$g.desc
+            Enabled = $(if ($null -ne $g.enabled) { [bool]$g.enabled } else { $true })
+            EveryN = [long]$g.every_n
+            PathTemplate = [string]$g.path_template
+            RequireNonempty = $(if ($null -ne $g.require_nonempty) { [bool]$g.require_nonempty } else { $false })
+        }
+    }
+}
 
 function Get-ChapterCandidates {
     param([string]$Nnn, [long]$Ch, [string]$Suffix)
@@ -370,6 +384,54 @@ function Test-PhaseCompress {
         return @(('阶段压缩校验：第{0}章为{1}倍数章，缺阶段压缩文件 {2}（03_18 工作流D：每{1}章自动触发阶段压缩）' -f $Ch, $phaseLen, $phasePath))
     }
     return @()
+}
+
+function Test-FileGates {
+    param([string]$ProjectRoot, [long]$Ch)
+    # 通用文件门禁（P0-P3）：与 py check_file_gates 同文案同口径
+    $errs = @()
+    if ($fileGates.Count -eq 0) { return @() }
+    $nnn = '{0:D3}' -f $Ch
+    foreach ($gate in $fileGates) {
+        if (-not $gate.Enabled) { continue }
+        $every = [long]$gate.EveryN
+        if ($every -le 0) { continue }
+        if (($Ch % $every) -ne 0) { continue }
+        $tpl = $gate.PathTemplate
+        if ([string]::IsNullOrEmpty($tpl)) { continue }
+        $period = [long][Math]::Floor($Ch / $every)
+        $start = (($period - 1) * $every) + 1
+        $end = $period * $every
+        # 变量替换（与 py str.format 同变量集）；{nnn} 双候选：零填充 + 不填充（同 py _candidate_names 口径）
+        $nnnPadded = $nnn
+        $nnnUnpadded = [string]$Ch
+        $rels = @()
+        if ($tpl.Contains('{nnn}')) {
+            $rels += $tpl.Replace('{nnn}', $nnnPadded).Replace('{ch}', [string]$Ch).Replace('{n}', [string]$period).Replace('{start}', [string]$start).Replace('{end}', [string]$end)
+            $rels += $tpl.Replace('{nnn}', $nnnUnpadded).Replace('{ch}', [string]$Ch).Replace('{n}', [string]$period).Replace('{start}', [string]$start).Replace('{end}', [string]$end)
+        }
+        else {
+            $rels += $tpl.Replace('{ch}', [string]$Ch).Replace('{n}', [string]$period).Replace('{start}', [string]$start).Replace('{end}', [string]$end)
+        }
+        $rels = @($rels | Select-Object -Unique)
+        $paths = @()
+        foreach ($rel in $rels) { $paths += (Join-Path $ProjectRoot ($rel -replace '/', [string][char]92)) }
+        $gname = $gate.Name
+        $gdesc = $gate.Desc
+        $descSuffix = ''
+        if (-not [string]::IsNullOrEmpty($gdesc)) { $descSuffix = '（' + $gdesc + '）' }
+        $foundPath = $null
+        foreach ($p in $paths) { if (Test-Path -LiteralPath $p -PathType Leaf) { $foundPath = $p; break } }
+        if ($null -eq $foundPath) {
+            $errs += ('文件门禁 {0}：第{1}章（每{2}章触发）缺文件 {3}{4}' -f $gname, $Ch, $every, $paths[0], $descSuffix)
+        }
+        elseif ($gate.RequireNonempty) {
+            if ((Get-Item -LiteralPath $foundPath).Length -eq 0) {
+                $errs += ('文件门禁 {0}：文件为空 {1}{2}' -f $gname, $foundPath, $descSuffix)
+            }
+        }
+    }
+    return $errs
 }
 
 function Test-TaskSheet {
@@ -633,6 +695,14 @@ if ($phaseErrs.Count -gt 0) {
     Write-Output ''
     Write-Output '❌ 阶段压缩校验未通过：'
     $phaseErrs | ForEach-Object { Write-Output ('  ' + $_) }
+    exit 1
+}
+
+$fileGateErrs = @(Test-FileGates -ProjectRoot $ProjectPath -Ch $Chapter)
+if ($fileGateErrs.Count -gt 0) {
+    Write-Output ''
+    Write-Output '❌ 文件门禁未通过（file_gates）：'
+    $fileGateErrs | ForEach-Object { Write-Output ('  ' + $_) }
     exit 1
 }
 

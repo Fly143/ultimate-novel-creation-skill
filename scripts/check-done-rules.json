@@ -102,5 +102,50 @@
     "phase_dir": "记忆系统/阶段",
     "phase_name_template": "阶段{n}_第{start}-{end}章.md",
     "phase_length": 10
+  },
+  "file_gates": {
+    "_comment": "通用文件门禁（P0-P3）：按频率检查项目文件存在性/非空。trigger=every(每章)/every_n(每N章)；path_template 变量 {nnn}=3位章号 {ch}=章号 {n}=周期序号 {start}/{end}=周期起止章。require_nonempty=true 时文件须有内容（区别于 .done 空标记）。",
+    "gates": [
+      {
+        "name": "archive",
+        "desc": "章节档案（03_26步骤6·每章必写，参数链条唯一输入源）",
+        "enabled": true,
+        "every_n": 1,
+        "path_template": "报告/第{nnn}章_章节档案.md",
+        "require_nonempty": true
+      },
+      {
+        "name": "param_compress",
+        "desc": "阶段参数链压缩（03_26步骤5·每10章，输入源=章节档案参数链条）",
+        "enabled": true,
+        "every_n": 10,
+        "path_template": "记忆系统/阶段/阶段{n}_参数.md",
+        "require_nonempty": true
+      },
+      {
+        "name": "innovation_report",
+        "desc": "创新深度检查报告（02索引·每10章，与 innovation.done 配套）",
+        "enabled": true,
+        "every_n": 10,
+        "path_template": "报告/创新深度检查报告.md",
+        "require_nonempty": true
+      },
+      {
+        "name": "volume_compress",
+        "desc": "卷压缩（03_18工作流D2·每50章，最高层级记忆缓存）",
+        "enabled": true,
+        "every_n": 50,
+        "path_template": "记忆系统/卷/卷{n}_第{start}-{end}章.md",
+        "require_nonempty": true
+      },
+      {
+        "name": "volume_param",
+        "desc": "卷参数快照（03_26步骤5·每50章，输入源=5个阶段参数表）",
+        "enabled": true,
+        "every_n": 50,
+        "path_template": "记忆系统/卷/卷{n}_参数.md",
+        "require_nonempty": true
+      }
+    ]
   }
 }

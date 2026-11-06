@@ -156,10 +156,11 @@ STATE_MARK: dict = {}
 BODY_GLOBS: list[str] = []
 PHASE_COMPRESS: dict = {}
 FILE_GATES: list[dict] = []
+CONTENT_CHECKS: list[dict] = []
 
 
 def _init_rules() -> None:
-    global RULES, BASE_MARKS, EVIDENCE_RULES, SECTION_TITLE, MIN_HITS, REQUIRE_STRONG, CLAIM_PARA_RE, STATE_MARK, BODY_GLOBS, PHASE_COMPRESS, FILE_GATES, TASK_SHEET, TASK_DIRS, TASK_SUFFIX, TASK_SECTIONS, TASK_ITEM_MARK
+    global RULES, BASE_MARKS, EVIDENCE_RULES, SECTION_TITLE, MIN_HITS, REQUIRE_STRONG, CLAIM_PARA_RE, STATE_MARK, BODY_GLOBS, PHASE_COMPRESS, FILE_GATES, CONTENT_CHECKS, TASK_SHEET, TASK_DIRS, TASK_SUFFIX, TASK_SECTIONS, TASK_ITEM_MARK
     RULES = load_rules()
     BASE_MARKS = list(RULES["base_marks"])
     EVIDENCE_RULES = [(r["name"], r["pattern"], bool(r["strong"])) for r in RULES["evidence_rules"]]
@@ -172,6 +173,8 @@ def _init_rules() -> None:
     PHASE_COMPRESS = RULES.get("phase_compress", {})
     _fg = RULES.get("file_gates", {})
     FILE_GATES = list(_fg.get("gates", [])) if isinstance(_fg, dict) else []
+    _cc = RULES.get("content_checks", {})
+    CONTENT_CHECKS = list(_cc.get("checks", [])) if isinstance(_cc, dict) else []
     TASK_SHEET = RULES["task_sheet"]
     TASK_DIRS = list(TASK_SHEET["dirs"])
     TASK_SUFFIX = TASK_SHEET["suffix"]
@@ -485,8 +488,20 @@ def check_file_gates(project: Path, chapter: int) -> list[str]:
             continue
         name = str(gate.get("name", tpl))
         desc = str(gate.get("desc", ""))
-        found_path = next((p for p in paths if p.is_file()), None)
+        if gate.get("use_glob", False):
+            import glob as _glob
+            found_path = None
+            for c in cands:
+                hits = sorted(_glob.glob(str(project / c)))
+                hit = next((h for h in hits if Path(h).is_file()), None)
+                if hit:
+                    found_path = Path(hit)
+                    break
+        else:
+            found_path = next((p for p in paths if p.is_file()), None)
         if found_path is None:
+            if gate.get("missing_ok", False):
+                continue  # 缺失交给更专门的检测（如摘要 stale 点名），此处只查非空
             errs.append(
                 f"文件门禁 {name}：第{chapter}章（每{every}章触发）缺文件 {paths[0]}"
                 + (f"（{desc}）" if desc else "")
@@ -497,6 +512,78 @@ def check_file_gates(project: Path, chapter: int) -> list[str]:
                     errs.append(f"文件门禁 {name}：文件为空 {found_path}" + (f"（{desc}）" if desc else ""))
             except OSError as exc:
                 errs.append(f"文件门禁 {name}：无法读取 {found_path}：{exc}")
+    return errs
+
+
+def check_content_checks(project: Path, chapter: int) -> list[str]:
+    """内容级门禁（P4-P5）：每章校验内容一致性。返回错误消息列表。
+
+    text_digest：正文 sha256 与 .story/text-digests.json 比对（防改稿未刷指纹）
+    state_consistency：调用 state_commit check（防手改派生件）
+    """
+    errs: list[str] = []
+    if not CONTENT_CHECKS:
+        return errs
+    nnn = f"{chapter:03d}"
+    for chk in CONTENT_CHECKS:
+        if not isinstance(chk, dict) or not chk.get("enabled", True):
+            continue
+        try:
+            every = int(chk.get("every_n", 1))
+        except (TypeError, ValueError):
+            continue
+        if every <= 0 or chapter % every != 0:
+            continue
+        name = str(chk.get("name", ""))
+        desc = str(chk.get("desc", ""))
+        suffix = f"（{desc}）" if desc else ""
+
+        if name == "text_digest":
+            digest_path = project / str(chk.get("digest_file", ".story/text-digests.json"))
+            if not digest_path.is_file():
+                # 无指纹文件 → 跳过（从未跑 digest 的项目/最小用例不强制；核心场景=文件存在但内容不匹配仍严格报错，同 P5 RequireStateFile 逻辑）
+                continue
+            try:
+                data = json.loads(digest_path.read_text(encoding="utf-8-sig"))
+            except (OSError, json.JSONDecodeError) as exc:
+                errs.append(f"内容门禁 text_digest：指纹文件解析失败 {digest_path}：{exc}{suffix}")
+                continue
+            recs = data.get("chapters", {}) if isinstance(data, dict) else {}
+            rec = recs.get(nnn) if isinstance(recs, dict) else None
+            if rec is None:
+                errs.append(f"内容门禁 text_digest：第{chapter}章无指纹记录（先跑 text_guard digest --chapter {chapter}）{suffix}")
+                continue
+            body_rel = str(rec.get("file", "")) if isinstance(rec, dict) else ""
+            body_path = Path(body_rel) if body_rel and Path(body_rel).is_absolute() else (project / body_rel if body_rel else None)
+            if body_path is None or not body_path.is_file():
+                errs.append(f"内容门禁 text_digest：正文文件缺失 {body_rel}{suffix}")
+                continue
+            import hashlib as _hashlib
+            actual = _hashlib.sha256(body_path.read_bytes()).hexdigest()
+            recorded = str(rec.get("sha256", ""))
+            if recorded and not (actual.startswith(recorded) or recorded.startswith(actual)):
+                errs.append(
+                    f"内容门禁 text_digest：第{chapter}章正文指纹不一致"
+                    f"（记录 {recorded[:12]} ≠ 实际 {actual[:12]}）——改稿后未重跑 digest → {body_path}{suffix}"
+                )
+
+        elif name == "state_consistency":
+            if chk.get("require_state_file", True) and not (project / "记忆系统" / "_state.json").is_file():
+                continue  # 旧项目无 _state.json → 走旧路径，跳过
+            import subprocess as _sp, sys as _sys
+            script = Path(__file__).resolve().parent / "state_commit.py"
+            try:
+                _r = _sp.run(
+                    [_sys.executable, str(script), "check", "--project", str(project)],
+                    capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=180,
+                )
+                if _r.returncode != 0:
+                    _tail = (_r.stdout or _r.stderr or "").strip().splitlines()
+                    _last = _tail[-1] if _tail else "无输出"
+                    errs.append(f"内容门禁 state_consistency：state_commit check 未通过（{_last}）{suffix}")
+            except Exception as exc:
+                errs.append(f"内容门禁 state_consistency：调用失败 {exc}{suffix}")
+
     return errs
 
 
@@ -792,6 +879,14 @@ def main() -> int:
         print()
         print("❌ 文件门禁未通过（file_gates）：")
         for m in file_gate_errs:
+            print(f"  {m}")
+        return 1
+
+    content_errs = check_content_checks(project, chapter)
+    if content_errs:
+        print()
+        print("❌ 内容门禁未通过（content_checks）：")
+        for m in content_errs:
             print(f"  {m}")
         return 1
 

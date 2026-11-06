@@ -237,6 +237,13 @@ def empty_done(
     _rep = project / "报告"
     _rep.mkdir(parents=True, exist_ok=True)
     (_rep / f"第{nnn}章_章节档案.md").write_text("# 档案\n元数据+参数链条", encoding="utf-8")
+    # file_gates summary_content：每章摘要文件同属最小配置（P6；缺它 exit1 的专项用例需显式删除后再测）
+    # 仅在不存在时创建：state commit 会渲染摘要，覆盖会致 state check 报派生件不一致
+    _sum = project / "记忆系统" / "摘要"
+    _sum.mkdir(parents=True, exist_ok=True)
+    _sumf = _sum / f"第{nnn}章摘要.md"
+    if not _sumf.exists():
+        _sumf.write_text("# 摘要\n测试摘要内容", encoding="utf-8")
 
 
 def write_report(project: Path, chapter: int, body: str, pad: bool = True) -> None:
@@ -594,6 +601,24 @@ def _run(results: list[bool]) -> int:
                 True,
                 lambda e, p=p5b: run(p, 9, engine=e)[0] == 0,
             )
+            # P6 summary_content：空摘要文件 → exit1（存在性由 stale 检测负责，此处只查非空；missing_ok 使缺失跳过）
+            _sum_p5b = p5b / "记忆系统" / "摘要" / "第009章摘要.md"
+            _sum_bak = _sum_p5b.read_text(encoding="utf-8")
+            _sum_p5b.write_text("", encoding="utf-8")
+            results += check_engines(
+                "P6 空摘要文件 → exit1",
+                True,
+                lambda e, p=p5b: run(p, 9, engine=e)[0] == 1,
+            )
+            _sum_p5b.write_text(_sum_bak, encoding="utf-8")
+            # P6 missing_ok：删摘要 → 仍 exit0（缺失交给 stale 检测点名，不重复报红）
+            _sum_p5b.unlink()
+            results += check_engines(
+                "P6 缺摘要文件（missing_ok）→ exit0 交 stale",
+                True,
+                lambda e, p=p5b: run(p, 9, engine=e)[0] == 0,
+            )
+            _sum_p5b.write_text(_sum_bak, encoding="utf-8")
 
             p6 = tmp_path / "p6"
             empty_done(p6, 1, BASE, pad=False)
@@ -1234,12 +1259,16 @@ def _run(results: list[bool]) -> int:
         _rjp = _cfgd / "check-done-rules.json"
         _rj = json.loads(_rjp.read_text(encoding="utf-8"))
         _rj["state_mark"]["auto_when_state_file"] = False
+        # 该用例 state={} 未渲染（测 12 项口径，非 state 一致性）→ 禁用 P5 避免被 state_consistency 拦截
+        for _c in _rj.get("content_checks", {}).get("checks", []):
+            if isinstance(_c, dict) and _c.get("name") == "state_consistency":
+                _c["enabled"] = False
         _rjp.write_text(json.dumps(_rj, ensure_ascii=False, indent=2), encoding="utf-8")
         p_auto = _nhd / "pauto"
         p_auto.mkdir()
         empty_done(p_auto, 1, BASE)
         write_report(p_auto, 1, GOOD_REPORT)
-        (p_auto / "记忆系统").mkdir()
+        (p_auto / "记忆系统").mkdir(exist_ok=True)  # empty_done 现会建 记忆系统/摘要，故容错
         (p_auto / "记忆系统" / "_state.json").write_text("{}", encoding="utf-8")
 
         def _auto_check(e):

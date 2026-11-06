@@ -248,6 +248,22 @@ if ($rules.file_gates -and $rules.file_gates.gates) {
             EveryN = [long]$g.every_n
             PathTemplate = [string]$g.path_template
             RequireNonempty = $(if ($null -ne $g.require_nonempty) { [bool]$g.require_nonempty } else { $false })
+            UseGlob = $(if ($null -ne $g.use_glob) { [bool]$g.use_glob } else { $false })
+            MissingOk = $(if ($null -ne $g.missing_ok) { [bool]$g.missing_ok } else { $false })
+        }
+    }
+}
+$contentChecks = @()
+if ($rules.content_checks -and $rules.content_checks.checks) {
+    foreach ($cc in $rules.content_checks.checks) {
+        if ($null -eq $cc -or $cc -isnot [pscustomobject]) { continue }
+        $contentChecks += @{
+            Name = [string]$cc.name
+            Desc = [string]$cc.desc
+            Enabled = $(if ($null -ne $cc.enabled) { [bool]$cc.enabled } else { $true })
+            EveryN = [long]$cc.every_n
+            DigestFile = [string]$cc.digest_file
+            RequireStateFile = $(if ($null -ne $cc.require_state_file) { [bool]$cc.require_state_file } else { $true })
         }
     }
 }
@@ -421,13 +437,104 @@ function Test-FileGates {
         $descSuffix = ''
         if (-not [string]::IsNullOrEmpty($gdesc)) { $descSuffix = '（' + $gdesc + '）' }
         $foundPath = $null
-        foreach ($p in $paths) { if (Test-Path -LiteralPath $p -PathType Leaf) { $foundPath = $p; break } }
+        $useGlob = [bool]$gate.UseGlob
+        if ($useGlob) {
+            foreach ($rel in $rels) {
+                $absGlob = Join-Path $ProjectRoot ($rel -replace '/', [string][char]92)
+                $hits = @(Get-ChildItem -Path $absGlob -File -ErrorAction SilentlyContinue)
+                if ($hits.Count -gt 0) { $foundPath = $hits[0].FullName; break }
+            }
+        }
+        else {
+            foreach ($p in $paths) { if (Test-Path -LiteralPath $p -PathType Leaf) { $foundPath = $p; break } }
+        }
         if ($null -eq $foundPath) {
+            if ($gate.MissingOk) { continue }  # 缺失交给更专门的检测（如摘要 stale 点名），此处只查非空
             $errs += ('文件门禁 {0}：第{1}章（每{2}章触发）缺文件 {3}{4}' -f $gname, $Ch, $every, $paths[0], $descSuffix)
         }
         elseif ($gate.RequireNonempty) {
             if ((Get-Item -LiteralPath $foundPath).Length -eq 0) {
                 $errs += ('文件门禁 {0}：文件为空 {1}{2}' -f $gname, $foundPath, $descSuffix)
+            }
+        }
+    }
+    return $errs
+}
+
+function Test-ContentChecks {
+    param([string]$ProjectRoot, [long]$Ch)
+    # 内容级门禁（P4-P5）：与 py check_content_checks 同文案同口径
+    $errs = @()
+    if ($contentChecks.Count -eq 0) { return @() }
+    $nnn = '{0:D3}' -f $Ch
+    foreach ($chk in $contentChecks) {
+        if (-not $chk.Enabled) { continue }
+        $every = [long]$chk.EveryN
+        if ($every -le 0) { continue }
+        if (($Ch % $every) -ne 0) { continue }
+        $name = $chk.Name
+        $desc = $chk.Desc
+        $suffix = ''
+        if (-not [string]::IsNullOrEmpty($desc)) { $suffix = '（' + $desc + '）' }
+
+        if ($name -eq 'text_digest') {
+            $digestRel = [string]$chk.DigestFile
+            if ([string]::IsNullOrEmpty($digestRel)) { $digestRel = '.story/text-digests.json' }
+            $digestPath = Join-Path $ProjectRoot ($digestRel -replace '/', [string][char]92)
+            if (-not (Test-Path -LiteralPath $digestPath -PathType Leaf)) {
+                # 无指纹文件 → 跳过（与 py 同口径；核心场景=文件存在但内容不匹配仍严格报错）
+                continue
+            }
+            try {
+                $data = Get-Content -LiteralPath $digestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+            } catch {
+                $errs += ('内容门禁 text_digest：指纹文件解析失败 {0}：{1}{2}' -f $digestPath, $_.Exception.Message, $suffix)
+                continue
+            }
+            $rec = $null
+            if ($null -ne $data -and $null -ne $data.PSObject.Properties['chapters']) {
+                $prop = $data.chapters.PSObject.Properties[$nnn]
+                if ($null -ne $prop) { $rec = $prop.Value }
+            }
+            if ($null -eq $rec) {
+                $errs += ('内容门禁 text_digest：第{0}章无指纹记录（先跑 text_guard digest --chapter {0}）{1}' -f $Ch, $suffix)
+                continue
+            }
+            $bodyRel = [string]$rec.file
+            if ([string]::IsNullOrEmpty($bodyRel)) {
+                $errs += ('内容门禁 text_digest：正文文件缺失 {0}{1}' -f $bodyRel, $suffix)
+                continue
+            }
+            $bodyPath = $bodyRel
+            if (-not [System.IO.Path]::IsPathRooted($bodyRel)) { $bodyPath = Join-Path $ProjectRoot ($bodyRel -replace '/', [string][char]92) }
+            if (-not (Test-Path -LiteralPath $bodyPath -PathType Leaf)) {
+                $errs += ('内容门禁 text_digest：正文文件缺失 {0}{1}' -f $bodyRel, $suffix)
+                continue
+            }
+            $recorded = [string]$rec.sha256
+            $actual = (Get-FileHash -LiteralPath $bodyPath -Algorithm SHA256).Hash.ToLower()
+            if (-not [string]::IsNullOrEmpty($recorded)) {
+                $recL = $recorded.ToLower()
+                if (-not ($actual.StartsWith($recL) -or $recL.StartsWith($actual))) {
+                    $errs += ('内容门禁 text_digest：第{0}章正文指纹不一致（记录 {1} ≠ 实际 {2}）——改稿后未重跑 digest → {3}{4}' -f $Ch, $recL.Substring(0, [Math]::Min(12, $recL.Length)), $actual.Substring(0, 12), $bodyPath, $suffix)
+                }
+            }
+        }
+        elseif ($name -eq 'state_consistency') {
+            $statePath = Join-Path $ProjectRoot ('记忆系统' + [string][char]92 + '_state.json')
+            $needState = $true
+            if ($null -ne $chk.PSObject.Properties['RequireStateFile']) { $needState = [bool]$chk.RequireStateFile }
+            if ($needState -and -not (Test-Path -LiteralPath $statePath -PathType Leaf)) { continue }
+            $scScript = Join-Path $PSScriptRoot 'state_commit.ps1'
+            if (-not (Test-Path -LiteralPath $scScript -PathType Leaf)) {
+                $errs += ('内容门禁 state_consistency：调用失败 缺 {0}{1}' -f $scScript, $suffix)
+                continue
+            }
+            $out = & $scScript -Command check -Project $ProjectPath 2>&1 | Out-String
+            if ($LASTEXITCODE -ne 0) {
+                $tail = ($out -split "`r?`n" | Where-Object { $_.Trim() -ne '' } | Select-Object -Last 1)
+                if (-not $tail) { $tail = '无输出' }
+                $errs += ('内容门禁 state_consistency：state_commit check 未通过（{0}）{1}' -f $tail.Trim(), $suffix)
             }
         }
     }
@@ -703,6 +810,14 @@ if ($fileGateErrs.Count -gt 0) {
     Write-Output ''
     Write-Output '❌ 文件门禁未通过（file_gates）：'
     $fileGateErrs | ForEach-Object { Write-Output ('  ' + $_) }
+    exit 1
+}
+
+$contentErrs = @(Test-ContentChecks -ProjectRoot $ProjectPath -Ch $Chapter)
+if ($contentErrs.Count -gt 0) {
+    Write-Output ''
+    Write-Output '❌ 内容门禁未通过（content_checks）：'
+    $contentErrs | ForEach-Object { Write-Output ('  ' + $_) }
     exit 1
 }
 

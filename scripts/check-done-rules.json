@@ -104,7 +104,7 @@
     "phase_length": 10
   },
   "file_gates": {
-    "_comment": "通用文件门禁（P0-P3）：按频率检查项目文件存在性/非空。trigger=every(每章)/every_n(每N章)；path_template 变量 {nnn}=3位章号 {ch}=章号 {n}=周期序号 {start}/{end}=周期起止章。require_nonempty=true 时文件须有内容（区别于 .done 空标记）。",
+    "_comment": "通用文件门禁（P0-P3）：按频率检查项目文件存在性/非空。trigger=every(每章)/every_n(每N章)；path_template 变量 {nnn}=3位章号 {ch}=章号 {n}=周期序号 {start}/{end}=周期起止章。require_nonempty=true 时文件须有内容（区别于 .done 空标记）。 use_glob=true 时 path_template 按 glob 匹配（任一命中且非空即通过），用于文件名有多种变体的场景。",
     "gates": [
       {
         "name": "archive",
@@ -145,6 +145,35 @@
         "every_n": 50,
         "path_template": "记忆系统/卷/卷{n}_参数.md",
         "require_nonempty": true
+      },
+      {
+        "name": "summary_content",
+        "desc": "单章摘要内容文件（03_26步骤2产出；.done_summary 只验空标记不验内容，此处补内容级校验）",
+        "enabled": true,
+        "every_n": 1,
+        "path_template": "记忆系统/摘要/第{nnn}章*摘要*.md",
+        "use_glob": true,
+        "require_nonempty": true,
+        "missing_ok": true
+      }
+    ]
+  },
+  "content_checks": {
+    "_comment": "内容级门禁（P4-P5）：每章校验内容一致性，区别于 file_gates 的存在性校验。text_digest=正文 sha256 与 .story/text-digests.json 记录比对（防改稿未刷指纹）；state_consistency=调用 state_commit check 校验派生件与 _state.json 逐字一致（防手改派生件）。",
+    "checks": [
+      {
+        "name": "text_digest",
+        "enabled": true,
+        "every_n": 1,
+        "digest_file": ".story/text-digests.json",
+        "desc": "正文指纹一致性（03_26 五·文本指纹；防 4.1e/修复轮改稿后未重跑 digest）"
+      },
+      {
+        "name": "state_consistency",
+        "enabled": true,
+        "every_n": 1,
+        "require_state_file": true,
+        "desc": "派生件与 _state.json 逐字一致（state_commit check；防手改派生圣经/摘要/上下文）"
       }
     ]
   }

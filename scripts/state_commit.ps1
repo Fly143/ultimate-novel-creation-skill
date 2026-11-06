@@ -51,7 +51,9 @@ function Write-Utf8File {
     # 原子写（P1-9）：临时文件 + 覆盖移动，失败不落半截。
     # 三参 File.Move / File.Replace(null backup) 在 Windows PowerShell 5.1(.NET Framework) 不可用 → Move-Item -Force（5.1/7 通用，失败保留原文件）。
     $tmp = "$Path.tmp"
-    [System.IO.File]::WriteAllText($tmp, $Text, $enc)
+    # 入盘统一 LF（.gitattributes eol=lf；与 state_render.py write_text(newline="\n") 逐字节一致）
+    $lfText = $Text.Replace("`r`n", "`n")
+    [System.IO.File]::WriteAllText($tmp, $lfText, $enc)
     Move-Item -LiteralPath $tmp -Destination $Path -Force
 }
 
@@ -71,9 +73,41 @@ function Get-RelPath {
 
 function Sort-Ordinal {
     param($Items)
-    $arr = @($Items | Where-Object { $null -ne $_ -and [string]$_ -ne '' })
+    # 必须强转 [string[]]：Object[] 上 [Array]::Sort(StringComparer) 不走 Ordinal 强类型重载（落到 culture 比较，中文乱序）——已实测 Object[] 版顺序 ≠ py sorted()
+    $arr = [string[]]@($Items | Where-Object { $null -ne $_ -and [string]$_ -ne '' })
     [Array]::Sort($arr, [System.StringComparer]::Ordinal)   # 与 Python sorted() 同为码点序
     return ,$arr
+}
+
+function ConvertTo-PyRepr {
+    # 与 Python str(obj) 递归 repr 一致：单引号字符串、{k: v}、[a, b]、True/False/None——供 state_render.py str(dict) 类字段对齐
+    param($Obj)
+    if ($null -eq $Obj) { return 'None' }
+    if ($Obj -is [string]) {
+        $s = $Obj
+        if ($s.Contains("'") -and -not $s.Contains('"')) { return '"' + $s + '"' }
+        return "'" + ($s.Replace('\', '\\').Replace("'", "\'")) + "'"
+    }
+    if ($Obj -is [bool]) { if ($Obj) { return 'True' } else { return 'False' } }
+    if ($Obj -is [int] -or $Obj -is [long] -or $Obj -is [int16] -or $Obj -is [byte]) { return [string]$Obj }
+    if ($Obj -is [double] -or $Obj -is [decimal] -or $Obj -is [float]) { return [string]$Obj }
+    if ($Obj -is [System.Collections.IEnumerable] -and $Obj -isnot [string]) {
+        $items = @()
+        foreach ($x in $Obj) { $items += (ConvertTo-PyRepr $x) }
+        return '[' + ($items -join ', ') + ']'
+    }
+    if ($Obj -is [System.Collections.IDictionary]) {
+        $parts = @()
+        foreach ($k in $Obj.Keys) { $parts += ("'{0}': {1}" -f $k, (ConvertTo-PyRepr $Obj[$k])) }
+        return '{' + ($parts -join ', ') + '}'
+    }
+    $props = $Obj.PSObject.Properties
+    if ($props -and $props.Count -gt 0) {
+        $parts = @()
+        foreach ($p in $props) { $parts += ("'{0}': {1}" -f $p.Name, (ConvertTo-PyRepr $p.Value)) }
+        return '{' + ($parts -join ', ') + '}'
+    }
+    return [string]$Obj
 }
 
 function Get-StatePath { param($Project) return (Join-Path $Project ($StateRel -replace '/', [string][char]92)) }
@@ -256,7 +290,9 @@ function Get-LineText {
             if ($null -ne $prop -and $null -ne $prop.Value -and [string]$prop.Value -ne '') { $parts += [string]$prop.Value }
         }
         if ($parts.Count) { return ($parts -join ' | ') }
-        return ($Entry | ConvertTo-Json -Compress -Depth 100)
+        $j = ($Entry | ConvertTo-Json -Compress -Depth 100)
+        # 与 state_render.py 对齐：json.dumps(..., separators=(',', ':')) = 无空格紧凑格式（数字值不带引号，正则补空格有边界风险故统一紧凑）
+        return $j
     }
     return [string]$Entry
 }
@@ -279,7 +315,13 @@ function Get-DerivedViews {
     $stages = @($ov.stages)
     if ($stages.Count -eq 0) { $lines.Add('- （未登记）') }
     else { foreach ($s in $stages) { $lines.Add(('- {0}' -f (Get-LineText $s))) } }
-    $lines.Add(''); $lines.Add('## 状态快照'); $lines.Add([string]$ov.snapshot); $lines.Add('')
+    $lines.Add(''); $lines.Add('## 状态快照')
+    # py L85: str(ov.get('snapshot')) —— 对象走 dict repr、字符串原样；[string] 对对象产 @{...} 不一致
+    $snap = $ov.snapshot
+    if ($null -eq $snap) { $lines.Add('') }
+    elseif ($snap -is [string]) { $lines.Add($snap) }
+    else { $lines.Add((ConvertTo-PyRepr $snap)) }
+    $lines.Add('')
     $views['圣经/故事圣经.md'] = ($lines -join $nl)
 
     # 2) 人物弧线
@@ -448,7 +490,10 @@ function Compare-DerivedViews {
         $p = Join-Path $base ($k -replace '/', [string][char]92)
         if (-not (Test-Path -LiteralPath $p)) { $bad += ('{0}（缺失）' -f $k); continue }
         $cur = [System.IO.File]::ReadAllText($p, $enc).Replace("`r`n", "`n")
-        if ($cur -ne $Views[$k]) { $bad += $k }
+        # 双侧同口径 LF（渲染侧含 `r`n 时单侧归一会致永不相等——py/ps1 逐字节一致按 LF 口径）
+        $rendered = [string]$Views[$k]
+        if ($rendered) { $rendered = $rendered.Replace("`r`n", "`n") }
+        if ($cur -ne $rendered) { $bad += $k }
     }
     foreach ($rel in @(Get-DerivedManifest $Project)) {
         if ($Views.Contains($rel)) { continue }

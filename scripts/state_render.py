@@ -50,7 +50,7 @@ def _line(entry) -> str:
         for k in ("chapter", "章", "event", "事件", "subject", "主体", "fact", "事实", "value", "值", "time", "时间"):
             if k in entry and entry[k] not in (None, ""):
                 parts.append(f"{entry[k]}")
-        return " | ".join(parts) if parts else json.dumps(entry, ensure_ascii=False)
+        return " | ".join(parts) if parts else json.dumps(entry, ensure_ascii=False, separators=(",", ":"))
     return str(entry)
 
 

@@ -4297,32 +4297,9 @@ def _run(results: list[bool]) -> int:
         empty_done(_p, 1, BASE + ["state"])
         write_report(_p, 1, GOOD_REPORT)
         write_body(_p, 1, 3)
-        _seed_ok = False
-        try:
-            _seed_ok = bool(_rp_seed_proof(_p))
-        except Exception as _exc:  # noqa: BLE001
-            print("[P7DUMP] engine=%s seed_exc=%s" % (e, repr(_exc)))
+        assert _rp_seed_proof(_p)
         _c, _o = _run_copy(_rd, _p, e, _rp_extra(e))
-        if (not _seed_ok) or ("read_proof" in _o):
-            _msg = "[P7DUMP] engine=%s seed_ok=%s rc=%s\n%s" % (e, _seed_ok, _c, _o[:3000])
-            if PS_RUNNER:
-                try:
-                    _dp = subprocess.run(
-                        [PS_RUNNER, "-ExecutionPolicy", "Bypass", "-NoProfile", "-File",
-                         str(_rd / "read_proof.ps1"), "-Project", str(_p), "-Chapter", "1",
-                         "-Proof", "报告/第001章_读取证明.json"],
-                        capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
-                    _msg += "\n[P7DUMP read_proof.ps1 直跑] rc=%s\n%s" % (
-                        _dp.returncode, (_decode(_dp.stdout) + "\n--stderr--\n" + _decode(_dp.stderr))[:3000])
-                except Exception as _exc2:  # noqa: BLE001
-                    _msg += "\n[P7DUMP 直跑异常] %s" % repr(_exc2)
-            print(_msg)
-            try:
-                from pathlib import Path as _P
-                (_P.cwd() / "regression-rp7-dump.log").write_text(_msg, encoding="utf-8")
-            except Exception:  # noqa: BLE001
-                pass
-        return (_seed_ok and ("read_proof" not in _o))
+        return "read_proof" not in _o
     results += check_engines("[P7] read_proof：真证明（哈希+原文子句+时间序） → 双引擎放行", True, _rp_pass)
 
     # C 未声明 read_proof_min_chapter → opt-in 不触发，缺证明也不报

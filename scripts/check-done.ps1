@@ -46,6 +46,26 @@ $Chapter = $_cvtChapter
 
 $ErrorActionPreference = 'Stop'
 
+function Get-Sha256Hex([string]$Path_) {
+    try {
+        if (Get-Command 'Get-FileHash' -ErrorAction SilentlyContinue) {
+            return ((Get-FileHash -LiteralPath $Path_ -Algorithm SHA256).Hash.ToLower())
+        }
+    } catch { }
+    # 兜底：环境里无 Get-FileHash（CI 精简 pwsh 态）时走 .NET SHA256，口径与 py hashlib 一致
+    $sha = $null
+    $stream = $null
+    try {
+        $stream = [System.IO.File]::OpenRead($Path_)
+        $sha = [System.Security.Cryptography.SHA256]::Create()
+        $bytes = $sha.ComputeHash($stream)
+        return (($bytes | ForEach-Object { $_.ToString('x2') }) -join '')
+    } finally {
+        if ($stream) { $stream.Dispose() }
+        if ($sha) { $sha.Dispose() }
+    }
+}
+
 function Sort-OrdinalPaths {
     # 对齐 py sorted(Path)：Windows 下 py 走 normcase（小写化）+ 码点序。
     # Sort-Object Name 走当前 culture（zh-CN 拼音序会与 py 反向）；
@@ -518,7 +538,7 @@ function Test-ContentChecks {
                 continue
             }
             $recorded = [string]$rec.sha256
-            $actual = (Get-FileHash -LiteralPath $bodyPath -Algorithm SHA256).Hash.ToLower()
+            $actual = Get-Sha256Hex $bodyPath
             if (-not [string]::IsNullOrEmpty($recorded)) {
                 $recL = $recorded.ToLower()
                 if (-not ($actual.StartsWith($recL) -or $recL.StartsWith($actual))) {

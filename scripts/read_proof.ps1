@@ -22,7 +22,23 @@ function ConvertTo-NormText([string]$s) {
 }
 
 function Get-Sha([string]$Path_) {
-    return (Get-FileHash -LiteralPath $Path_ -Algorithm SHA256).Hash.ToLower()
+    try {
+        if (Get-Command 'Get-FileHash' -ErrorAction SilentlyContinue) {
+            return ((Get-FileHash -LiteralPath $Path_ -Algorithm SHA256).Hash.ToLower())
+        }
+    } catch { }
+    # 兜底：环境里无 Get-FileHash（CI 精简 pwsh 态）时走 .NET SHA256，口径与 py hashlib 一致
+    $sha = $null
+    $stream = $null
+    try {
+        $stream = [System.IO.File]::OpenRead($Path_)
+        $sha = [System.Security.Cryptography.SHA256]::Create()
+        $bytes = $sha.ComputeHash($stream)
+        return (($bytes | ForEach-Object { $_.ToString('x2') }) -join '')
+    } finally {
+        if ($stream) { $stream.Dispose() }
+        if ($sha) { $sha.Dispose() }
+    }
 }
 
 function Read-AnyText([string]$Path_) {

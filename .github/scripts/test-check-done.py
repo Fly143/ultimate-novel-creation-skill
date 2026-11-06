@@ -4223,6 +4223,100 @@ def _run(results: list[bool]) -> int:
     def _mut594(b):
         _dup59 = dict(b["paths"][0])
         b["paths"].append(_dup59)
+    # ===== P7 读取牌验（read_proof；opt-in 内容门禁） =====
+    # ===== P7 读取牌验 =====
+    _rd = _copy_engine_dir("rp_p7")
+    for _t in ("read_proof.py", "read_proof.ps1"):
+        shutil.copy2(ROOT / "scripts" / _t, _rd / _t)
+    _rjf = _rd / "check-done-rules.json"
+    _rjx = json.loads(_rjf.read_text(encoding="utf-8-sig"))
+    for _c in _rjx.get("content_checks", {}).get("checks", []):
+        if isinstance(_c, dict) and _c.get("name") == "state_consistency":
+            _c["enabled"] = False
+    _rjf.write_text(json.dumps(_rjx, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def _rp_proj() -> Path:
+        _p = _nhd / "rp_p7proj"
+        (_p / "正文").mkdir(parents=True, exist_ok=True)
+        (_p / "记忆系统" / "圣经").mkdir(parents=True, exist_ok=True)
+        (_p / "记忆系统" / "摘要").mkdir(parents=True, exist_ok=True)
+        (_p / "设定" / "细纲").mkdir(parents=True, exist_ok=True)
+        (_p / "报告").mkdir(parents=True, exist_ok=True)
+        (_p / "记忆系统" / "圣经" / "故事圣经.md").write_text(
+            "灵潮降临三十年后，城中的地下冒出一座城。主角依靠 bug 感知看破对方的空档。\n",
+            encoding="utf-8")
+        (_p / "记忆系统" / "摘要" / "第001章摘要.md").write_text(
+            "第001章摘要：主角遇到一个看不见边界的东西。他顺手看清楚了它的朝向。\n",
+            encoding="utf-8")
+        (_p / "设定" / "细纲" / "第001章_细纲.md").write_text(
+            "第001章细纲：角色拉线过度倒在训练场上。他被抬去医务室量出低烧。\n",
+            encoding="utf-8")
+        (_p / "记忆系统" / "_state.json").write_text(json.dumps({
+            "read_proof_min_chapter": 1,
+            "last_committed_chapter": 1,
+        }, ensure_ascii=False), encoding="utf-8")
+        return _p
+
+    _rp_files = ("记忆系统/圣经/故事圣经.md", "记忆系统/摘要/第001章摘要.md", "设定/细纲/第001章_细纲.md")
+
+    def _rp_seed_proof(p: Path) -> str:
+        import hashlib as _hl, re as _re
+        reads = []
+        _now = __import__("datetime").datetime.now().astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
+        _ts = _now.isoformat(timespec="seconds")
+        for rel in _rp_files:
+            raw = (p / rel).read_text(encoding="utf-8")
+            segs = [s.strip() for s in _re.split(r"[。\n]", raw) if len(s.strip()) >= 6][:2]
+            reads.append({"path": rel, "sha256": _hl.sha256((p / rel).read_bytes()).hexdigest(),
+                          "extracts": segs, "read_at": _ts})
+        _pf = p / "报告" / "第001章_读取证明.json"
+        _pf.write_text(json.dumps({"chapter": 1, "reads": reads}, ensure_ascii=False, indent=2), encoding="utf-8")
+        return "✅" in __import__("subprocess").run(
+            [PY, str(_rd / "read_proof.py"), "-p", str(p), "-c", "1"],
+            capture_output=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"}).stdout.decode("utf-8", "replace")
+
+
+    def _rp_extra(e: str) -> tuple[str, ...]:
+        return ("--soft-report",) if e == "py" else ("-SoftReport",)
+
+    # A 缺证明 → 双引擎报「缺读取证明文件」（软报告断言文案，脏报告夹具不承担闭环宣称）
+    def _rp_missing(e: str) -> bool:
+        _p = _rp_proj()
+        empty_done(_p, 1, BASE + ["state"])
+        write_report(_p, 1, GOOD_REPORT)
+        write_body(_p, 1, 3)
+        _pf = _p / "报告" / "第001章_读取证明.json"
+        if _pf.exists(): _pf.unlink()
+        _c, _o = _run_copy(_rd, _p, e, _rp_extra(e))
+        return "缺读取证明文件" in _o
+    results += check_engines("[P7] read_proof：缺读取证明 → 双引擎同文案阻断（opt-in 触发）", True, _rp_missing)
+
+    # B 真证明 → 双引擎放行（无 read_proof 报错）
+    def _rp_pass(e: str) -> bool:
+        _p = _rp_proj()
+        empty_done(_p, 1, BASE + ["state"])
+        write_report(_p, 1, GOOD_REPORT)
+        write_body(_p, 1, 3)
+        assert _rp_seed_proof(_p)
+        _c, _o = _run_copy(_rd, _p, e, _rp_extra(e))
+        return "read_proof" not in _o
+    results += check_engines("[P7] read_proof：真证明（哈希+原文子句+时间序） → 双引擎放行", True, _rp_pass)
+
+    # C 未声明 read_proof_min_chapter → opt-in 不触发，缺证明也不报
+    def _rp_skip(e: str) -> bool:
+        _p = _rp_proj()
+        _st = json.loads((_p / "记忆系统" / "_state.json").read_text(encoding="utf-8"))
+        _st.pop("read_proof_min_chapter")
+        (_p / "记忆系统" / "_state.json").write_text(json.dumps(_st, ensure_ascii=False), encoding="utf-8")
+        empty_done(_p, 1, BASE + ["state"])
+        write_report(_p, 1, GOOD_REPORT)
+        write_body(_p, 1, 3)
+        _pf = _p / "报告" / "第001章_读取证明.json"
+        if _pf.exists(): _pf.unlink()
+        _c, _o = _run_copy(_rd, _p, e, _rp_extra(e))
+        return "read_proof" not in _o
+    results += check_engines("[P7] read_proof：未声明 read_proof_min_chapter → opt-in 不触发（存量项目零影响）", True, _rp_skip)
+
     # d59⑤ 清单同 id 重复条目 → 双引擎产物逐字一致（ps1 引用判不连坐，原 id 集合判丢条目）
     _d59 = _nhd / "d59"
     (_d59 / "记忆系统" / "圣经").mkdir(parents=True)

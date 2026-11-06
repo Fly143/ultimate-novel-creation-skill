@@ -264,6 +264,12 @@ if ($rules.content_checks -and $rules.content_checks.checks) {
             EveryN = [long]$cc.every_n
             DigestFile = [string]$cc.digest_file
             RequireStateFile = $(if ($null -ne $cc.require_state_file) { [bool]$cc.require_state_file } else { $true })
+            proof_file = [string]$cc.proof_file
+            state_path = [string]$cc.state_path
+            state_field = [string]$cc.state_field
+            min_files = $(if ($null -ne $cc.min_files) { [int]$cc.min_files } else { [int]3 })
+            min_extracts = $(if ($null -ne $cc.min_extracts_per_file) { [int]$cc.min_extracts_per_file } else { [int]2 })
+            min_chars = $(if ($null -ne $cc.min_chars_per_extract) { [int]$cc.min_chars_per_extract } else { [int]6 })
         }
     }
 }
@@ -535,6 +541,39 @@ function Test-ContentChecks {
                 $tail = ($out -split "`r?`n" | Where-Object { $_.Trim() -ne '' } | Select-Object -Last 1)
                 if (-not $tail) { $tail = '无输出' }
                 $errs += ('内容门禁 state_consistency：state_commit check 未通过（{0}）{1}' -f $tail.Trim(), $suffix)
+            }
+        }
+        elseif ($name -eq 'read_proof') {
+            $spPath = Join-Path $ProjectRoot ([string]$chk.state_path)
+            $mval = $null
+            if (Test-Path -LiteralPath $spPath -PathType Leaf) {
+                try {
+                    $sobj = (Get-Content -LiteralPath $spPath -Raw -Encoding UTF8 | ConvertFrom-Json)
+                    $sf = [string]$chk.state_field
+                    if ($null -ne $sobj.PSObject.Properties[$sf]) { $mval = $sobj.$sf }
+                } catch { $mval = $null }
+            }
+            if ($null -eq $mval) { continue }
+            try { $mvalInt = [int]$mval } catch { continue }
+            if ($mvalInt -gt $Ch) { continue }
+            $relTmpl = [string]$chk.proof_file
+            $rel = $relTmpl.Replace('{nnn}', $nnn).Replace('{ch}', "$Ch")
+            $proofPath = Join-Path $ProjectRoot ($rel -replace '/', [string][char]92)
+            if (-not (Test-Path -LiteralPath $proofPath -PathType Leaf)) {
+                $errs += ('内容门禁 read_proof：第{0}章缺读取证明文件 {1}（写作输入留证；先跑 scripts/read_proof.py --init（或 scripts/read_proof.ps1 --Init）再填写 extracts）{2}' -f $Ch, $rel, $suffix)
+                continue
+            }
+            $rp = Join-Path $PSScriptRoot 'read_proof.ps1'
+            if (-not (Test-Path -LiteralPath $rp -PathType Leaf)) {
+                $errs += ('内容门禁 read_proof：缺校验工具 {0}{1}' -f $rp, $suffix)
+                continue
+            }
+            $out2 = & $rp -Project $ProjectPath -Chapter $Ch -Proof $rel 2>&1 | Out-String
+            if ($LASTEXITCODE -ne 0) {
+                $line2 = ($out2 -split "`r?`n" | Where-Object { $_.Trim() -ne '' -and $_.Trim().StartsWith([char]0xFF1D) } | Select-Object -First 1)
+                if (-not $line2) { $line2 = (($out2 -split "`r?`n" | Where-Object { $_.Trim() -ne '' } | Select-Object -First 1)) }
+                if (-not $line2) { $line2 = '无输出' }
+                $errs += ('内容门禁 read_proof：{0}{1}' -f $line2.Trim(), $suffix)
             }
         }
     }

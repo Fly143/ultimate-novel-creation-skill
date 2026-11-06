@@ -584,6 +584,45 @@ def check_content_checks(project: Path, chapter: int) -> list[str]:
             except Exception as exc:
                 errs.append(f"内容门禁 state_consistency：调用失败 {exc}{suffix}")
 
+        elif name == "read_proof":
+            # P7 读取牌验（opt-in）：项目 _state.json 声明 read_proof_min_chapter 起生效；无字段/无 state 文件 → 跳过（存量项目与最小用例不受影响）
+            sp = project / str(chk.get("state_path", "记忆系统/_state.json"))
+            _mval = None
+            if sp.is_file():
+                try:
+                    _sobj = json.loads(sp.read_text(encoding="utf-8-sig"))
+                    if isinstance(_sobj, dict):
+                        _mval = _sobj.get(str(chk.get("state_field", "read_proof_min_chapter")))
+                except (OSError, json.JSONDecodeError):
+                    _mval = None
+            if _mval is None or not isinstance(_mval, int) or isinstance(_mval, bool) or chapter < _mval:
+                continue
+            _rel = str(chk.get("proof_file", "报告/第{nnn}章_读取证明.json")).replace("{nnn}", nnn).replace("{ch}", str(chapter))
+            if not (project / _rel).is_file():
+                errs.append(f"内容门禁 read_proof：第{chapter}章缺读取证明文件 {_rel}（写作输入留证；先跑 scripts/read_proof.py --init（或 scripts/read_proof.ps1 --Init）再填写 extracts）{suffix}")
+                continue
+            _api = Path(__file__).resolve().parent / "read_proof.py"
+            if not _api.is_file():
+                errs.append(f"内容门禁 read_proof：缺校验工具 scripts/read_proof.py{suffix}")
+                continue
+            import subprocess as _sp2, sys as _sys2
+            try:
+                _r2 = _sp2.run(
+                    [_sys2.executable, str(_api), "-p", str(project), "-c", str(chapter),
+                     "--proof", _rel,
+                     "--min-files", str(int(chk.get("min_files", 3))),
+                     "--min-extracts", str(int(chk.get("min_extracts_per_file", 2))),
+                     "--min-chars", str(int(chk.get("min_chars_per_extract", 6)))],
+                    capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
+                )
+                if _r2.returncode != 0:
+                    _t2 = (_r2.stdout or _r2.stderr or "").strip().splitlines()
+                    _t2 = [ln2.strip() for ln2 in _t2 if ln2.strip() and ln2.strip().startswith("❌")]
+                    _tail2 = "；".join(_t2)[:200] if _t2 else "无输出"
+                    errs.append(f"内容门禁 read_proof：{_tail2}{suffix}")
+            except Exception as _exc2:
+                errs.append(f"内容门禁 read_proof：调用失败 {_exc2}{suffix}")
+
     return errs
 
 

@@ -55,7 +55,7 @@
 3. 全量审核子代理 U（八项一次出报告）
 4. **无论 PASS/FAIL，先执行朱雀 4.1b–4.1e**（分布/用词/六指标/**人工证据包**）→ 立即写 **`.done_zhuque`**
 5. 如有 FAIL/建议：修复子代理（**禁止整段重写人工注入段**）→ 二次 U 复核；修复改动大时补跑 4.1e 自查；**改过正文 → 重跑 `text_guard digest` 刷新指纹为最终稿**
-6. 4.4 报告合并写 `.done_merge` → 新架构 `state_commit commit` 写 `.done_state`（03_26 五·状态提交，两步不可漏之二；总流程步骤4 尾，与 03_26 同序）→ 必需 `.done` 全齐（含 `zhuque` 与 `merge`；新架构含 `state` 共 13 项）→（按需）周期检查 → `.done_chapter`
+6. 4.4 报告合并写 `.done_merge` → 新架构 `state_commit commit` 写 `.done_state`（03_26 五·状态提交，两步不可漏之二；总流程步骤4 尾，与 03_26 同序）→ 必需 `.done` 全齐（含 `zhuque` 与 `merge`；新架构含 `state` 共 13 项，10 倍数章 14 项）→（按需）周期检查 → `.done_chapter`
 7. 输出 **【第NNN章状态】回执**
 
 **漏步自愈**：缺任一必需 `.done`（尤其 `zhuque`）→ 禁止称完成、禁止写 N+1，自动补缺。delegate 失败时降级自审仍必须跑 4.1b–4.1e。可选 `scripts/check-done.ps1` / `scripts/check-done.py` 做客观 `.done` 核验（规则单源 `scripts/check-done-rules.json`；**只认空标记，非空无效**；**默认要求 chapter.done**；报告「人工证据包」节**默认硬校验**：标题 + 结构证据类别 ≥2 类且至少含一类强证据（须带段号/字数结构）+ 正文段号交叉）。**禁止**携带 `--allow-non-empty`/`-AllowNonEmpty`/`--soft-report`/`--no-chapter-done`。

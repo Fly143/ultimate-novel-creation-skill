@@ -89,7 +89,7 @@
     ]
   },
   "state_mark": {
-    "_comment": "P0-3：项目存在 记忆系统/_state.json 时才要求 第NNN章_state.done（新增架构=13 项必需；无 state 文件的存量项目维持 12 项，向后兼容）。",
+    "_comment": "P0-3：项目存在 记忆系统/_state.json 时才要求 第NNN章_state.done（新增架构=13 项必需、10 倍数章 14 项；无 state 文件的存量项目维持 12 项、10 倍数章 13 项，向后兼容）。",
     "name": "state",
     "auto_when_state_file": true,
     "state_file": "记忆系统/_state.json",
